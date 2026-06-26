@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://data-builder/skill-presets/dataset-profile.schema.json",
+  "title": "Dataset profile",
+  "description": "The per-dataset parameters every data-builder skill and the src/ exporter/validator need. A skill LOADS a profile (or a worked example below) then CONFIRMS each field against the actual file before using it — values here are never auto-applied. Contract documented in wiki/architecture/data-skill-preset-contract.md. The hard platform rules these feed are in wiki/architecture/platform-*.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["dataset_name", "label_column", "sensor_columns", "separator", "task_type"],
+  "properties": {
+    "dataset_name": {
+      "type": "string",
+      "description": "Human label for this dataset/model (one dataset trains one model)."
+    },
+    "label_column": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Name of the target/label column. The platform's desktop runner defaults to 'target'; the gesture demo uses 'class' (then pass -t class to the runner)."
+    },
+    "sensor_columns": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+      "minItems": 1,
+      "description": "The sensor-axis columns (one reading per axis per row), e.g. acc_x..gyro_z. Names are author-chosen but must obey the header charset [A-Za-z0-9_-]."
+    },
+    "session_column": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Optional Session ID column marking a time-continuous process. Windows do not cross session boundaries; sessions shorter than the window are dropped."
+    },
+    "time_column": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Optional timestamp column. Must be epoch/relative numeric, never a calendar string. Often absent for fixed-rate signal data (time is implicit)."
+    },
+    "separator": {
+      "type": "string",
+      "enum": ["comma", "semicolon", "pipe", "caret", "tab"],
+      "description": "Field delimiter. Platform accepts these five; the desktop runner defaults to comma."
+    },
+    "sampling_rate_hz": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Single sampling rate for the whole dataset (Hz). Mixed rates must be resampled to one common rate before upload. ALWAYS record it."
+    },
+    "units": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Per-quantity unit record, e.g. {\"acceleration\":\"g\",\"angular_velocity\":\"deg/s\"}. The platform does not dictate units (values only need to be numeric); record them for downstream sanity.",
+      "default": {}
+    },
+    "task_type": {
+      "type": "string",
+      "enum": ["multiclass_classification", "binary_classification", "regression", "anomaly_detection"],
+      "description": "Fixed at platform solution-creation. Gesture recognition is multiclass_classification."
+    },
+    "target_technology": {
+      "type": "string",
+      "enum": ["neuton", "axon"],
+      "default": "neuton",
+      "description": "Which framework the model will be built with. Axon (LiteRT, on the Axon NPU) accepts ONLY FLOAT32; Neuton accepts INT8/INT16/FLOAT32. Drives the recommended input data type — see wiki/architecture/platform-preprocessing-options.md."
+    },
+    "class_encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Classification target encoding. REQUIRED for classification tasks; omit for regression/anomaly.",
+      "required": ["map"],
+      "properties": {
+        "map": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "name -> integer index. Must start at 0 and be contiguous (e.g. {\"idle\":0,\"unknown\":1,\"swipe_left\":2}). Save this dictionary; the platform needs >=2 classes and >=20 samples each."
+        },
+        "continuous_classes": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Class indices that are continuous streams (idle/unknown) — trimmed to a window multiple, not centered.",
+          "default": []
+        },
+        "gesture_classes": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Class indices that are discrete gestures — centered so the motion peak sits mid-window.",
+          "default": []
+        }
+      }
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Intended windowing the data must be compatible with (the user sets these in the platform UI; the data-builder only validates compatibility).",
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 10, "maximum": 2048 },
+          "minItems": 1,
+          "maxItems": 2,
+          "description": "One or two candidate window sizes in samples. The CONDITIONAL hard rule (enforced by the validator, not expressible here): if frequency_domain_features is false the window must be in [10,1000]; if true it must be a power of 2 in [128,2048]. The schema bound 10-2048 only spans both cases."
+        },
+        "shift": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Sliding shift in samples. For TRAINING, set shift = window (no overlap) to avoid imbalance; overlap is for inference. Hard rule (validator-enforced): shift cannot exceed the window size. null = unspecified (validator emits an info finding)."
+        },
+        "frequency_domain_features": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, window must be power-of-2 in 128-2048 and the min contiguous run per class escalates to 128."
+        }
+      }
+    },
+    "holdout_path": {
+      "type": ["string", "null"],
+      "description": "Optional path to a holdout/test CSV. Must match the training file's structure and field order, else the platform auto-splits 80/20."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-text caveats for this dataset."
+    }
+  }
+}

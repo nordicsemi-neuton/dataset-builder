@@ -1,0 +1,37 @@
+{
+  "$comment": "ILLUSTRATIVE worked example only — NOT a platform rule and NOT a default. A skill loads this to resolve the gesture-demo column names / 'class' label in one place, then asks the user to confirm or override every field against their actual file (process P-02/P-03). The idle=0 / unknown=1 / gestures=2..7 indices are an illustrative convention (scripts/README.md), not platform law.",
+  "dataset_name": "nordic_gesture_demo",
+  "label_column": "class",
+  "sensor_columns": ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"],
+  "session_column": null,
+  "time_column": null,
+  "separator": "comma",
+  "sampling_rate_hz": 100,
+  "units": {
+    "acceleration": "m/s^2",
+    "angular_velocity": "deg/s"
+  },
+  "task_type": "multiclass_classification",
+  "target_technology": "neuton",
+  "class_encoding": {
+    "map": {
+      "idle": 0,
+      "unknown": 1,
+      "swipe_left": 2,
+      "swipe_right": 3,
+      "swipe_up": 4,
+      "swipe_down": 5,
+      "rotate": 6,
+      "tap": 7
+    },
+    "continuous_classes": [0, 1],
+    "gesture_classes": [2, 3, 4, 5, 6, 7]
+  },
+  "window": {
+    "candidates": [99],
+    "shift": 99,
+    "frequency_domain_features": false
+  },
+  "holdout_path": null,
+  "notes": "Demo numbers from the platform gesture walkthrough: ~1 s gestures at 100 Hz -> 99-sample window. acc_z ~9.7-9.8 is consistent with m/s^2. Confirm everything against the real file before use."
+}

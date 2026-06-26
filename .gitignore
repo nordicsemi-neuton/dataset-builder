@@ -1,0 +1,17 @@
+# Python caches / tooling
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# OS noise
+.DS_Store
+
+# Working outputs — the folder ships (with .gitkeep); built datasets do not.
+output/*
+!output/.gitkeep
+input/*
+!input/.gitkeep

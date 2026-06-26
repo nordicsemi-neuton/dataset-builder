@@ -11,6 +11,26 @@
 
 ---
 
+## Quickstart — no coding required
+
+New here? You don't need to read the rest of this page to get a working dataset. Just:
+
+1. **Download this repo** — click the green **Code** button at the top of this page → **Download ZIP** → unzip it to a folder on your computer.
+2. **Open that folder in [Claude Code](https://claude.com/claude-code)** — it comes as a VS Code / JetBrains extension, a Mac/Windows desktop app, or online at [claude.ai/code](https://claude.ai/code). Just point it at this folder.
+3. **Send one message** to start the guided, start-to-finish preparation — pointing it at wherever your sensor recordings are saved on your computer:
+
+   ```
+   /build-dataset use the data in this directory: /Users/you/Downloads/data
+   ```
+
+4. **Let it guide you.** It looks through your recordings, explains what it finds in plain language, asks you a few simple questions along the way, fixes the formatting the platform requires, and checks that nothing will be quietly dropped.
+
+You end up with **one clean CSV file** — plus a short plain-language summary — that you upload to the [Nordic Edge AI Lab](https://ai.lab.nordicsemi.com) platform to train your model. No spreadsheets, no manual data wrangling.
+
+> Everything below is the detail — what the tool does, how it's built, and how to run it from the command line — for when you want to go deeper.
+
+---
+
 ## What this is
 
 [Nordic Edge AI Lab](https://ai.lab.nordicsemi.com) is Nordic Semiconductor's no-code TinyML service: you upload a CSV of sensor readings, and it automatically builds a compact model (via the **Neuton** framework or the **Axon NPU**) that runs on Nordic's ultra-low-power wireless SoCs (Cortex-M0/M4/M33).

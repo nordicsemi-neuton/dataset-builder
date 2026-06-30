@@ -7,7 +7,7 @@
 - [platform — Dataset requirements (the input CSV contract)](architecture/platform-dataset-requirements.md) — hard CSV contract: format, encoding, separators, columns, value/type rules, class minimums, sensor row layout, holdout. _Updated: 2026-06-25_
 - [platform — Data pipeline (end-to-end workflow)](architecture/platform-data-pipeline.md) — the 9-step model-creating pipeline; where our tool plugs in (upload/setup); solution creation, target column, session ID, holdout 80/20. _Updated: 2026-06-25_
 - [platform — Deployment, inference & model settings](architecture/platform-deployment-inference.md) — bit depth, output format, target HW (Cortex-M0/M4/M33, Axon NPU); desktop inference-runner CSV contract (target/session/delimiter defaults). _Updated: 2026-06-25_
-- [platform — Feature extraction & selection](architecture/platform-feature-extraction.md) — feature catalogue (time/frequency domain), per-axis counting, FFT power-of-2 window rule, feature-selection pruning rules. _Updated: 2026-06-25_
+- [platform — Feature extraction & selection](architecture/platform-feature-extraction.md) — feature catalogue (time/frequency domain), per-axis counting, FFT power-of-2 window rule, feature-selection pruning rules, the measured enable-set method (direction features, INT16 hold-backs). _Updated: 2026-06-30_
 - [platform — Preprocessing options (data type, normalization, task, metrics)](architecture/platform-preprocessing-options.md) — INT8/INT16/FLOAT32 ranges, normalization, task types & evaluation metrics. _Updated: 2026-06-25_
 - [platform — Signal Processing (windowing & sampling contract)](architecture/platform-signal-processing.md) — window size 10–1000 (FFT 128–2048 pow2), sliding shift, sub-windowing, single-sampling-rate rule, SRAM. _Updated: 2026-06-25_
 - [data — Dataset-profile (skill preset) contract](architecture/data-skill-preset-contract.md) — the per-dataset profile schema the skills + src/ engine consume; confirm-first, never auto-applied; runtime files in data/skill-presets/. _Updated: 2026-06-25_
@@ -33,5 +33,5 @@
 
 ## principles
 
-- [Domain principles — inertial data prep & modeling](principles/domain.md) — P-01..P-10: window survival, training shift, contiguous labels, single sampling rate, centering, LR direction features, postprocessing ceiling, EMA default, preprocessing parity, idle/unknown class. _Updated: 2026-06-25_
+- [Domain principles — inertial data prep & modeling](principles/domain.md) — P-01..P-12: window survival, training/inference shift, contiguous labels, single sampling rate, centering, direction features, postprocessing ceiling, EMA default, preprocessing parity, idle/unknown class, sensor-scale reconciliation, measured feature enable-set. _Updated: 2026-06-30_
 - [Process principles — how to diagnose a user's problem](principles/process.md) — P-01..P-08: read both halves, profile first, reconcile claims vs data, simulate, ceiling/parity checks, confirm protocol, reply structure, skills-reference-wiki-by-path. _Updated: 2026-06-25_

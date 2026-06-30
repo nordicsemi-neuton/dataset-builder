@@ -42,6 +42,16 @@
       "exclusiveMinimum": 0,
       "description": "Single sampling rate for the whole dataset (Hz). Mixed rates must be resampled to one common rate before upload. ALWAYS record it."
     },
+    "accel_full_scale_g": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Accelerometer full-scale range in g (e.g. 2, 4, 8, 16). ASK the user up front. Fixes counts-per-g, so the data can stay RAW INT16 (no float conversion - the platform consumes raw) and scale/segmentation can be checked (at rest |acc| ~ 1 g in counts). See wiki/principles/domain.md P-11."
+    },
+    "gyro_full_scale_dps": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "Gyroscope full-scale range in degrees/second (e.g. 125, 250, 500, 1000, 2000). ASK the user up front. Fixes counts-per-dps. The gyro reads ~0 at rest, so rest gives no gyro scale reference. See wiki/principles/domain.md P-11."
+    },
     "units": {
       "type": "object",
       "additionalProperties": { "type": "string" },

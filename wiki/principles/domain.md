@@ -1,7 +1,7 @@
 ---
 type: principles
 status: active
-updated: 2026-06-25
+updated: 2026-06-30
 sources:
   - Field experience (practitioner knowledge; no external source document).
   - ../../scripts/diagnostics/window_survival_sim.py
@@ -27,7 +27,7 @@ Rules drawn from field experience with common data-prep scenarios. These are **e
 
 ## P-02 — Training sliding-shift = window size; heavy overlap is an inference-only tool
 
-**Rule:** For training, set sliding shift equal to the window (non-overlapping samples). Reserve small shifts (heavy overlap) for inference, where they raise query frequency.
+**Rule:** For **training**, set sliding shift equal to the window (non-overlapping samples). For **inference** (gesture/activity recognition), always recommend an **overlapping** shift — **50–70% overlap** (shift ≈ 30–50% of the window) so a gesture isn't missed between queries; the exact overlap depends on the gesture/activity duration and variability (shorter/faster ⇒ more overlap). Heavy overlap is an inference tool, never a training one.
 **Why:** A small training shift massively over-samples whichever class has the longest continuous runs (usually idle), producing extreme imbalance that masquerades as "data removal."
 **Precedent:** shift=10 with window=150 left ~99.7% of surviving windows in the idle class.
 **Source:** field experience (practitioner knowledge); see [signal-processing contract](../architecture/platform-signal-processing.md).
@@ -86,3 +86,32 @@ Rules drawn from field experience with common data-prep scenarios. These are **e
 **Rule:** For gesture/event models, include an **idle** class and an **"unknown"** ("none of the above") class, the latter populated with the user's real non-target activities. Idle/unknown are continuous streams (not centered — see P-05).
 **Why:** Without a catch-all, every input is forced into a gesture class, producing constant false detections in normal use. This is the canonical iteration loop: deploy → observe false triggers → add their patterns to "unknown" → retrain.
 **Source:** field experience (practitioner knowledge); [data-collection practices](../discovery/platform-data-collection-practices.md).
+
+## P-11 — Reconcile sensor *scale* across sources; gravity-at-rest is the probe, but motion invalidates it
+
+**Rule:** Treat each source's/file's sensor **scale** (accelerometer full-scale range or units) as a claim to reconcile against the data, alongside rate and labels ([P-03](#p-03--labels-must-be-contiguous-from-0-reconcile-the-stated-mapping-against-the-actual-data), [P-04](#p-04--one-sampling-rate-across-all-sessions-resample-before-upload)). The recordings of one dataset can silently mix scales — e.g. ±2g raw counts (gravity ≈16384), ±4g (≈8192) and physical units (m/s²×1000, gravity ≈9810). Probe each file's scale by its **gravity magnitude** `|acc| = √(ax²+ay²+az²)` at rest (= 1 g in that file's units). Bring **every** source onto the **one** scale the inference device emits, or exclude the mismatched files; never train a class across mixed scales. Calibrate from gravity only what gravity touches — the **accelerometer**; the **gyroscope reads ~0 at rest**, so it has no at-rest scale reference and an acc-only gravity rescale can leave the gyro mismatched — prefer re-export/exclude over a partial rescale.
+**Ask up front (don't infer):** at the framing stage ask the user the **accelerometer full-scale** (±2g / 4g / 8g / 16g) and the **gyroscope full-scale in dps** (125 / 250 / 500 / 1000…). These fix counts-per-g and counts-per-dps, which lets you (a) keep the data as **raw INT16 and never convert it to floats** — the platform consumes raw integers, conversion only loses fidelity and footprint; (b) sanity-check scale and segment rest vs motion (at rest `|acc|` ≈ 1 g in counts **and** gyro ≈ 0). Record both in the profile (`accel_full_scale_g`, `gyro_full_scale_dps`).
+**Method caveat (load-bearing):** the gravity probe is valid **only where the device rests**. In continuous motion (rotations, walking, vigorous gestures) linear acceleration adds to or opposes gravity, so `|acc|` swings around 1 g and a low-percentile estimate dips far below it — falsely flagging a physical-scale file as a smaller-range scale. Use the **histogram mode** (the baseline the signal returns to) and **validate the probe against known-at-rest sources** before trusting it. A file with no rest at all (continuous spin) is **undeterminable** from `|acc|`; infer its scale from rest-containing files of the **same capture session** rather than excluding it on a motion artifact.
+**Why:** time-domain features (STD, RMS, RANGE, MEAN…) are scale-dependent, and the platform normalizes **per-axis globally**, which does **not** realign per-file scale differences *within* a class. At inference the device streams one scale, so off-scale training data — especially the idle/"unknown" background and the near-miss negatives — represents input the device never produces and teaches the wrong boundary. Same train/inference-consistency logic as [P-04](#p-04--one-sampling-rate-across-all-sessions-resample-before-upload) (one rate) and [P-09](#p-09--preprocessing-parity-never-filter-only-at-inference) (one preprocessing).
+**When to apply:** combining multi-source / multi-file recordings; any "background misbehaves / false detections at inference" with mixed capture provenance; before centering or feature analysis (mixed scales corrupt both).
+**Precedent:** an 8-person wrist-gesture dataset — gesture captures uniform at gravity ≈9810 (physical), but the idle/unknown background mixed all three scales; only ~28% of background matched the gestures. A 5th-percentile `|acc|` probe falsely flagged the continuous rotation classes as off-scale (motion, not scale); a mode-based probe **validated against the at-rest idle files** (which split cleanly 6/7/7 across ±2g/±4g/physical) corrected it. Off-scale background was excluded for a consistent first build, with the dropped near-miss negatives queued for re-export in the gesture units.
+**Source:** this session (30.06.2026); field experience (practitioner knowledge). See [process P-03](process.md) (reconcile claims) and [case patterns](../synthesis/support-case-patterns.md).
+
+## P-12 — Recommend the feature enable-set from a measured separability pass (and what to hold back)
+
+**Rule:** When preparing a multi-class gesture/activity dataset — **not only after training** — run a **measured feature-separability pass** on the centered data and recommend a concrete platform enable-set with evidence; never just assert a feature or two. Method: window per class, compute the platform's time-domain catalogue per axis, rank by multiclass separability (ANOVA F) and per-class one-vs-rest, and for **every class pair compute the best magnitude-only separation** — pairs that magnitude can't separate (best magnitude Cohen's-d ≲ 1) are *direction/sign* problems, not energy problems. Map the evidence to platform families:
+
+- **Energy/magnitude** (Standard Deviation, Root Mean Square, Range, Mean Absolute Deviation, Absolute Mean) — separates rest/background from active, and high- from low-energy gestures. Always include.
+- **Signed level + direction** (Mean, Min, Max, **Linear Regression Slope**, **Linear Regression Intercept**, Percentage of Signal over Zero, Percentage of Signal over Mean) — the only features carrying *direction*; required whenever opposite/mirror classes exist (left/right, up/down, CW/CCW). Magnitude features are **direction-blind**. Linear Regression Slope/Intercept are additionally **orientation-invariant** ([P-06](#p-06--direction-discrimination-requires-lr_slope--lr_intercept-the-only-signed-asymmetry-features)).
+- **Impulse/shape** (Crest Factor, Hjorth Mobility, Hjorth Complexity) — isolates sharp/impulsive classes (taps) that energy features miss.
+
+**Hold back (current defaults):**
+
+- **INT16 input ⇒ do not recommend Skewness or Kurtosis** (higher-moment features are unstable/noisy on integer data); the other signed features still carry direction. Revisit if storage moves to FLOAT32.
+- **Do not enable the platform's feature-selection in the first experiment.** First train with the advised set and **test in real conditions**; only if optimization is then needed, re-run the *same* experiment **with** feature-selection to prune for size. Pruning before seeing real behaviour can drop a feature deployment needs.
+- **Frequency-domain (FFT)** features need a power-of-2 window in 128–2048 ([feature page](../architecture/platform-feature-extraction.md)); don't switch windows just to unlock them unless time-domain separability is insufficient.
+
+**Why:** the platform extracts and (optionally) selects features itself, but *which families are enabled* is the user's lever. A measured pass turns "enable the direction features" into an evidence-backed full set and catches the magnitude-blind pairs that silently conflate; the INT16 and first-experiment cautions avoid two common ways an early model is led astray (unstable moments, premature pruning).
+**When to apply:** preparing any multi-class gesture/activity dataset (a required step of the build, [feature-advice](../../.claude/skills/feature-advice/SKILL.md)); any "which features should I enable / why don't classes separate?" question.
+**Precedent:** the 8-person wrist-gesture build — magnitude-only Cohen's-d ≈ 0.5 on left/right, up/down and CW/CCW (blind); direction lived in signed level (acc_z mean for up/down, gyro_x mean for rotation) and gyro_y asymmetry (Percentage of Signal over Zero/Mean for left/right); double-thumb-tap isolated by Hjorth Mobility; INT16 ⇒ Skewness/Kurtosis held back.
+**Source:** this session (30.06.2026); field experience (practitioner knowledge); [feature extraction](../architecture/platform-feature-extraction.md). Related: [P-02](#p-02--training-sliding-shift--window-size-heavy-overlap-is-an-inference-only-tool) (inference overlap), [P-06](#p-06--direction-discrimination-requires-lr_slope--lr_intercept-the-only-signed-asymmetry-features).

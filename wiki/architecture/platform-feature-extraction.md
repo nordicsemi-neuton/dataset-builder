@@ -1,7 +1,7 @@
 ---
 type: architecture
 status: active
-updated: 2026-06-25
+updated: 2026-06-30
 implementation:
   - ../../raw/platform-docs/2026-06-25-pipeline-signal-processing-features.md
 sources:
@@ -54,6 +54,16 @@ Auto-enabled when sub-windowing is on (per the [windowing contract](platform-sig
 
 From field experience: **`LR_SLOPE` and `LR_INTERCEPT` (Linear Regression Slope/Intercept) are the only features that encode signed asymmetry within a window** — i.e. *direction* of motion. Magnitude features (STD, RMS, MAD, RANGE, ABSMEAN) carry none; MEAN/MIN/MAX are weak. With LR features off, opposite-direction gestures (left/right, up/down) sit nearly on top of each other in feature space → the model conflates them or leaves a class dead. Enabling them recovered previously-dead direction classes in a real model. They are also **orientation-invariant**, so they're essential when training data spans multiple device orientations (per-class axis-mean sign flips). The enabled set is encoded in `FEATURES_EXTRACTION_MASK` in the model archive — decode it with [`feature_mask_decoder.py`](../../scripts/diagnostics/feature_mask_decoder.py). See [domain P-06](../principles/domain.md) and the [model archive](../discovery/platform-model-archive.md).
 
+## Recommending the enable-set (measured separability) — a required build step
+
+Advising "which features to enable" is not an after-thought: as part of preparing a gesture/activity dataset, **measure** which families separate the classes and recommend a full enable-set with evidence ([domain P-12](../principles/domain.md)). Method on the centered data: window per class, compute the time-domain catalogue per axis, rank by multiclass ANOVA F + per-class one-vs-rest, and for **every class pair** compute the best **magnitude-only** separation — pairs magnitude can't separate (best Cohen's-d ≲ 1) are *direction* problems, not energy problems. Map to families:
+
+- **Energy** (Standard Deviation, Root Mean Square, Range, Mean Absolute Deviation, Absolute Mean) — rest vs active, high vs low energy. Always on.
+- **Signed level + direction** (Mean, Min, Max, **Linear Regression Slope**, **Linear Regression Intercept**, Percentage of Signal over Zero, Percentage of Signal over Mean) — the only direction carriers; required for mirror/opposite classes (magnitude is direction-blind). Linear Regression Slope/Intercept are orientation-invariant.
+- **Impulse/shape** (Crest Factor, Hjorth Mobility, Hjorth Complexity) — sharp/impulsive classes (taps).
+
+Current hold-backs: **INT16 input ⇒ do not recommend Skewness/Kurtosis** (higher moments are unstable on integers; revisit for FLOAT32); **do not enable feature-selection in the first experiment** (train the advised set, test in real conditions, then prune for size only if needed); **FFT** stays off unless a power-of-2 128–2048 window is justified. Footprint: each enabled feature × every axis adds inputs, so a smaller enabled set is a smaller model — but prune by *measured importance later*, not by guessing up front.
+
 ## Implementation
 
-No tool code yet. Authoritative source: `raw/platform-docs/`. The data-builder mainly needs the **frequency-domain window constraint**, the **feature-count → footprint** relationship, and the **direction-feature** insight above when advising users; it does not implement these features itself. Feature-mask decoding tool: [`scripts/diagnostics/feature_mask_decoder.py`](../../scripts/diagnostics/feature_mask_decoder.py).
+The measured enable-set is produced by the reviewed diagnostic [`scripts/diagnostics/feature_separability.py`](../../scripts/diagnostics/feature_separability.py) (windowed per-class features → ANOVA-F + per-class one-vs-rest + magnitude-blind-pair detection → mapped enable-set in full platform names; deterministic, built through the task cycle — see [domain P-12](../principles/domain.md)). The data-builder otherwise does **not** compute platform features (the platform does); it needs the **frequency-domain window constraint**, the **feature-count → footprint** relationship, and the **direction-feature** insight above when advising. Authoritative source: `raw/platform-docs/`. Feature-mask decoding tool: [`scripts/diagnostics/feature_mask_decoder.py`](../../scripts/diagnostics/feature_mask_decoder.py).

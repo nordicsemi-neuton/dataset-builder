@@ -19,6 +19,7 @@ The *why* behind each script — the diagnostic moves, the rules, and the worked
 | `feature_mask_decoder.py` | Decodes `FEATURES_EXTRACTION_MASK` from a model archive's `nrf_edgeai_user_model.c` into a per-axis feature table; flags whether `LR_SLOPE`/`LR_INTERCEPT` (the only signed-asymmetry features) are enabled. | Direction-confusion / dead-class tickets. |
 | `check_signal_centered.py` | Per class, walks non-overlapping windows and reports the distribution of the motion-peak position → verdict CENTERED / LOOSE / RAW. | "Is this training data centered?" before any feature analysis. |
 | `windowed_feature_distribution_comparison.py` | Computes per-window time-domain features for train (per class) vs test; per-axis STD envelopes + mean Cohen's-d distance test↔class. | "Predictions are uniformly wrong" → distribution-shift check. |
+| `feature_separability.py` | Deterministic. Windows each class, ranks the time-domain catalogue by multiclass ANOVA-F + per-class one-vs-rest, flags **magnitude-blind class pairs** (direction problems), gates Skewness/Kurtosis on storage dtype, and prints a recommended platform enable-set in full feature names. | "Which features should I enable?" — the measured enable-set (build-dataset Stage 5 / feature-advice). |
 
 ## preprocessing/ — shape raw recordings into upload-ready training data
 

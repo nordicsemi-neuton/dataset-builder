@@ -4,8 +4,8 @@
 
 [![Platform: Nordic Edge AI Lab](https://img.shields.io/badge/platform-Nordic%20Edge%20AI%20Lab-00A9CE)](https://ai.lab.nordicsemi.com)
 [![Docs](https://img.shields.io/badge/docs-edge--ai--lab-00A9CE)](https://docs.nordicsemi.com/bundle/edge-ai-lab/page/index.html)
-[![Python](https://img.shields.io/badge/python-3.9%2B-3776AB)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)](src/tests/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-91%20passing-brightgreen)](src/tests/)
 
 > Clone it, point it at your raw CSVs, and get back a single training file that the platform will actually accept — plus an honest report of anything that would be silently dropped before you upload.
 
@@ -197,4 +197,4 @@ This is an **experimental utility maintained by Nordic Semiconductor**, provided
 
 ## License
 
-This project is MIT-licensed — see [`LICENSE`](LICENSE). Note that [`raw/platform-docs/`](raw/platform-docs/) reproduces Nordic Semiconductor official documentation and remains © Nordic Semiconductor ASA.
+This project is licensed under the **Nordic 5-Clause License** — see [`LICENSE`](LICENSE). Note that [`raw/platform-docs/`](raw/platform-docs/) reproduces Nordic Semiconductor official documentation and remains © Nordic Semiconductor ASA, governed by Nordic's documentation terms rather than the license above.

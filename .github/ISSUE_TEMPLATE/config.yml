@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/nordicsemi-neuton/dataset-builder/security/policy
+    about: Please report security issues privately — see our Security Policy, not a public issue.
+  - name: Nordic Edge AI Lab documentation
+    url: https://docs.nordicsemi.com/bundle/edge-ai-lab/page/index.html
+    about: Questions about the platform itself (not this tool) are answered in the official docs.

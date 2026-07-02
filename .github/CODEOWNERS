@@ -1,0 +1,6 @@
+# Code owners — automatically requested for review on pull requests.
+# The owner must have write access to this repository for auto-request to work.
+# (If review is later moved to an Edge AI / Neuton GitHub team, replace @DanilZherebtsov
+#  with the @org/team-name slug — a one-line change.)
+
+*                       @DanilZherebtsov

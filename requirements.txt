@@ -1,0 +1,5 @@
+# Runtime dependencies for data-builder — pinned for reproducible installs and CI.
+# Only two third-party libraries are used; everything else is the Python standard library.
+# Bump deliberately and re-run the suite (PYTHONPATH=src python3 -m unittest discover -s src/tests).
+numpy==2.4.4
+pandas==3.0.3

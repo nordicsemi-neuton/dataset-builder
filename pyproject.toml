@@ -1,0 +1,33 @@
+# Package metadata for data-builder.
+# The tool runs from source (PYTHONPATH=src); this file declares the package, its
+# dependencies, and the supported Python range so installs and tooling are reproducible.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dataset-builder"
+version = "0.1.0"
+description = "Prepare inertial-sensor recordings into upload-ready training datasets for the Nordic Edge AI Lab platform."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Nordic Semiconductor ASA" }]
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.2",
+]
+
+[project.urls]
+Homepage = "https://ai.lab.nordicsemi.com"
+Documentation = "https://docs.nordicsemi.com/bundle/edge-ai-lab/page/index.html"
+
+[project.scripts]
+data-builder = "data_builder.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["data_builder*"]

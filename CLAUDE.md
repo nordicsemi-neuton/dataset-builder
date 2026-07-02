@@ -21,7 +21,7 @@ The root file holds **always-on rules and pointers**. Detailed procedures live i
 
 ### The target platform — Nordic Edge AI Lab
 
-The platform is **Nordic Semiconductor's Edge AI Lab** ([docs](https://docs.nordicsemi.com/bundle/edge-ai-lab/page/index.html)) — a no-code TinyML service that auto-builds compact models (the **Neuton** framework; **Axon NPU** via LiteRT) for Nordic wireless SoCs (Cortex-M0/M4/M33). Full, verified knowledge lives in `wiki/architecture/platform-*` and `wiki/discovery/platform-*` — **that wiki is canonical; the bullets below are orientation only, trust the wiki on any conflict, and read the relevant `platform-*` page before any data task.** (Memory pointer: `memory/nordic-edge-ai-lab-platform-kb.md`.)
+The platform is **Nordic Semiconductor's Edge AI Lab** ([docs](https://docs.nordicsemi.com/bundle/edge-ai-lab/page/index.html)) — a no-code TinyML service that auto-builds compact models (the **Neuton** framework; **Axon NPU** via LiteRT) for Nordic wireless SoCs (Cortex-M0/M4/M33). Full, verified knowledge lives in `wiki/architecture/platform-*` and `wiki/discovery/platform-*` — **that wiki is canonical; the bullets below are orientation only, trust the wiki on any conflict, and read the relevant `platform-*` page before any data task.**
 
 **Always-on essentials — the input-CSV contract our output must satisfy:**
 - One **CSV** (combine multiple recordings first; one dataset → one model), **UTF-8 / ISO-8859-1**, **header row first**, separator ∈ {`,` `;` `|` `^` tab}, **dot** decimal (no thousands sep), **CRLF/LF**; column names unique & `[A-Za-z0-9_-]`.
@@ -103,9 +103,8 @@ Rules:
 2. **`methodology/`** — operation details. On trigger, not in the background.
 3. **Wiki** (`wiki/`) — canonical knowledge from ingest.
 4. **Raw sources** (`raw/`) — first source when in doubt.
-5. **Auto-memory** (`MEMORY.md`, `memory/`) — cache between sessions, **not canonical**.
 
-**memory vs wiki:** always trust the wiki. **wiki vs source:** re-verify the source and fix the wiki (don't assume the wiki "knows better" — that's how drift sets in). **Writing to memory:** new knowledge goes into `wiki/` first via ingest; into memory only a short pointer.
+**wiki vs source:** re-verify the source and fix the wiki (don't assume the wiki "knows better" — that's how drift sets in). New knowledge goes into `wiki/` first via ingest.
 
 **`STATE.md` is a separate axis**, not part of the hierarchy: intentions and progress, not claims about the world. It doesn't conflict with the wiki (different domains).
 

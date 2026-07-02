@@ -1,0 +1,35 @@
+# CodeQL static analysis (BURAN policy).
+# NOTE: If your org enforces CodeQL "default setup" (enabled centrally in repo Settings →
+# Security), this workflow file is redundant — remove it and enable default setup instead.
+# Confirm which form BURAN requires before going public. See spec release-006 §B-4.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 3 * * 1"  # weekly, Monday 03:27 UTC
+
+permissions:
+  actions: read          # CodeQL init reads the workflow run; without this the token scope is 'none'
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

@@ -1,7 +1,7 @@
 ---
 type: architecture
 status: active
-updated: 2026-06-25
+updated: 2026-07-10
 implementation:
   - ../../src/data_builder/datatype.py
   - ../../raw/platform-docs/2026-06-25-pipeline-data-preprocessing.md
@@ -9,6 +9,7 @@ sources:
   - ../../raw/platform-docs/2026-06-25-pipeline-data-preprocessing.md
   - ../../raw/platform-docs/2026-06-25-pipeline-signal-processing-windowing.md
   - ../../raw/platform-docs/2026-06-25-get-started-2-cleaning-combining-preprocessing.md
+  - owner-supplied platform knowledge (10.07.2026, direct, not in the doc bundle)
 tags: [platform, preprocessing, data-type, normalization, task-type, metrics, contract]
 ---
 
@@ -51,7 +52,8 @@ Pick a **single** numeric type for **all** features: **INT8, INT16, or FLOAT32**
 | Anomaly Detection | normal vs outlier | Reconstruction Accuracy |
 
 ### Metric notes relevant to data preparation
-- **Class imbalance** → prefer **Balanced Accuracy** / weighted F1 (the gesture demo picks Balanced Accuracy because gesture classes are imbalanced). The data-builder should report per-class counts so the user can choose. (Hard floor regardless: **≥20 samples/class** — see [dataset requirements](platform-dataset-requirements.md).)
+- **Class imbalance** → prefer **Balanced Accuracy** / weighted F1 **for reading results**, not as a training fix (the gesture demo picks Balanced Accuracy because gesture classes are imbalanced). The data-builder should report per-class counts so the user can choose. (Hard floor regardless: **≥20 samples/class** — see [dataset requirements](platform-dataset-requirements.md).)
+- **The selected metric does not change how the model is trained.** Neuton's optimizer always minimizes cross-entropy internally regardless of which metric is selected in the UI — the metric is evaluation/model-comparison only. Recommending a metric switch can fix how a user *reads* an imbalanced result (a small-class gain hidden by Accuracy becomes visible under Balanced Accuracy/weighted F1); it will not make a retrain behave differently. See [Neuton framework](../discovery/platform-neuton-framework.md) and [domain P-13](../principles/domain.md).
 - AUC ∈ [0,1] (1 perfect, 0.5 random); F1/Precision/Recall ∈ [0,1]; R²: 1 perfect, 0 no power; RMSE = √MSE (lower better); **RMSPE excludes rows whose target is 0**.
 - Full metric definitions: see [raw](../../raw/platform-docs/2026-06-25-pipeline-data-preprocessing.md) (tables reproduced verbatim there) — not duplicated here to keep this page atomic.
 

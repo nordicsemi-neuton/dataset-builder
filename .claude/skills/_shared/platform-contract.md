@@ -75,8 +75,11 @@ Sources: [preprocessing options](../../../wiki/architecture/platform-preprocessi
 - 🔒/🧪 **Input data type:** pick the widest type present — one float value ⇒ whole dataset FLOAT32;
   else INT16 if any value exceeds ±127, else INT8. Recommend from observed ranges; wrong type costs
   footprint/accuracy.
-- 🧪 **Class imbalance** ⇒ recommend Balanced Accuracy / weighted F1 over plain Accuracy; report
-  per-class counts so the user can choose the metric.
+- 🧪 **Class imbalance** ⇒ recommend Balanced Accuracy / weighted F1 over plain Accuracy **for reading
+  results, not as a training fix** — the platform's optimizer always minimizes cross-entropy regardless
+  of the selected metric, so a metric change makes an existing small-class result visible, it does not
+  make the next training run try harder on that class. Report per-class counts so the user can choose.
+  [domain P-13]
 - 🧪 **Directional / multi-orientation classes** (left vs right, up vs down) need the signed-asymmetry
   features **LR_SLOPE / LR_INTERCEPT** enabled, or they conflate/die. [domain P-06] —
   [feature extraction](../../../wiki/architecture/platform-feature-extraction.md).

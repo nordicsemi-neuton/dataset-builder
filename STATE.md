@@ -1,6 +1,6 @@
 # STATE — operational state
 
-_Updated: 2026-07-02_
+_Updated: 2026-07-13_
 
 > Not canonical: reflects intentions and progress, not facts. Rules — [methodology/state-rules.md](methodology/state-rules.md).
 >

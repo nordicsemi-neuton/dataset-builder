@@ -185,7 +185,10 @@ def check_dataframe(df: pd.DataFrame, profile: DatasetProfile, window: int, freq
             if counts and min(counts.values()) and max(counts.values()) / min(counts.values()) >= 3:
                 findings.append(Finding(
                     Group.BAD_MODEL, Severity.ADVISORY, "class_imbalance",
-                    "Classes are imbalanced; prefer Balanced Accuracy or weighted F1 over plain Accuracy.",
+                    "Classes are imbalanced; read results with Balanced Accuracy or weighted F1, not plain "
+                    "Accuracy, so a small-class change isn't hidden by the large classes. This only changes "
+                    "how you read results — the platform's training always optimizes cross-entropy "
+                    "regardless of the selected metric, so switching metrics is not itself a training fix.",
                     f"{PREPROC}#task-type--evaluation-metric", {"counts": counts}))
 
     # Window range (conditional on frequency-domain).

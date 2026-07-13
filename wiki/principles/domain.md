@@ -1,7 +1,7 @@
 ---
 type: principles
 status: active
-updated: 2026-06-30
+updated: 2026-07-10
 sources:
   - Field experience (practitioner knowledge; no external source document).
   - ../../scripts/diagnostics/window_survival_sim.py
@@ -115,3 +115,32 @@ Rules drawn from field experience with common data-prep scenarios. These are **e
 **When to apply:** preparing any multi-class gesture/activity dataset (a required step of the build, [feature-advice](../../.claude/skills/feature-advice/SKILL.md)); any "which features should I enable / why don't classes separate?" question.
 **Precedent:** the 8-person wrist-gesture build — magnitude-only Cohen's-d ≈ 0.5 on left/right, up/down and CW/CCW (blind); direction lived in signed level (acc_z mean for up/down, gyro_x mean for rotation) and gyro_y asymmetry (Percentage of Signal over Zero/Mean for left/right); double-thumb-tap isolated by Hjorth Mobility; INT16 ⇒ Skewness/Kurtosis held back.
 **Source:** this session (30.06.2026); field experience (practitioner knowledge); [feature extraction](../architecture/platform-feature-extraction.md). Related: [P-02](#p-02--training-sliding-shift--window-size-heavy-overlap-is-an-inference-only-tool) (inference overlap), [P-06](#p-06--direction-discrimination-requires-lr_slope--lr_intercept-the-only-signed-asymmetry-features).
+
+## P-13 — The platform's selected metric is evaluation-only; it never changes what Neuton optimizes
+
+**Rule:** Never claim (or advise a user) that switching the platform's selected metric (e.g. Accuracy →
+Balanced Accuracy / weighted F1) will change training behaviour, push the model to try harder on weak/rare
+classes, or affect an automatic-stopping decision. **Neuton's internal optimization always minimizes
+cross-entropy loss, regardless of which metric is selected in the UI.** The selected metric is computed
+and shown for the user's evaluation/interpretation only — it plays no role in the training loop itself.
+**What a metric change *is* good for:** correctly reading results the user already has (an improvement on
+a small class can be invisible in plain Accuracy against big background classes) — advise it for that,
+never as a lever expected to change the next training run's outcome.
+**Why:** [the Neuton framework page](../discovery/platform-neuton-framework.md) states training/validation/
+model-selection happen "automatically" from **(data, target, metric)**, which reads as if metric were a
+training input on the same footing as data — it is not; only data and target shape what the network
+learns. Metric is the third input in the sense of "what to report and compare across models," not "what
+loss to descend." Getting this backwards produces a plausible-sounding but wrong diagnosis and a wasted
+retrain.
+**When to apply:** any "why didn't accuracy improve on an imbalanced dataset" diagnosis, before recommending
+a metric change as a fix (as opposed to a measurement improvement); any explanation of what Neuton's
+automatic training actually does.
+**Precedent:** a remote-control gesture case (imbalance widened by new data, weakest class "up" showing no
+improvement) — the metric-affects-training explanation was floated as part of the diagnosis and forwarded
+in a draft customer recommendation, then corrected by the owner (direct platform knowledge: metric
+selection is evaluation-only, optimization is always cross-entropy) before it reached the customer. The
+imbalance finding itself stood independent of this — cross-entropy summed over an imbalanced training set
+still gives more total gradient mass to the frequent classes, so imbalance remains a real, separate
+concern; only the "changing the metric will fix it" mechanism was wrong.
+**Source:** this session (10.07.2026); owner-supplied platform knowledge (direct, not from the doc bundle).
+Related: [P-12](#p-12--recommend-the-feature-enable-set-from-a-measured-separability-pass-and-what-to-hold-back).

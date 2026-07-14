@@ -1,5 +1,5 @@
 ---
-name: feature-advice
+name: nrf-feature-advice
 description: >-
   Advise which platform features to enable/disable and which window settings to choose so classes
   separate accurately on Nordic Edge AI Lab — the tool never computes features, the platform does. Use
@@ -21,7 +21,7 @@ advises; it does not compute features. Canonical knowledge:
 
 Raw and centered datasets are not comparable in feature space. Before any separability analysis, confirm
 centering with [`check_signal_centered.py`](../../../scripts/diagnostics/check_signal_centered.py); if raw,
-center first (the **prep-dataset** skill's `--center`, or
+center first (the **nrf-prep-dataset** skill's `prep` — centering is default-on — or
 [`center_training_data.py`](../../../scripts/preprocessing/center_training_data.py)) — per class, never
 across class boundaries ([domain P-05](../../../wiki/principles/domain.md)).
 
@@ -34,10 +34,14 @@ enabled.
 ## 3. Produce the enable-set from a measured separability pass
 
 Don't assert one or two features — **measure and recommend a full set** ([domain P-12](../../../wiki/principles/domain.md)).
-Run the deterministic diagnostic on the centered data:
+`<python>` = your Python 3.11+ interpreter — resolve it and check the environment per
+[_shared/runtime.md](../_shared/runtime.md) before the first run; the engine and `scripts/` are black
+boxes — if a command fails, fix the environment per runtime.md; never replace them with ad-hoc scripts or
+install anything beyond `requirements.txt`. Run the deterministic diagnostic on the centered data, from
+the repo root:
 
 ```
-python3 scripts/diagnostics/feature_separability.py <centered.csv> --profile <profile.json>
+<python> scripts/diagnostics/feature_separability.py <centered.csv> --profile <profile.json>
 ```
 
 It windows each class, computes the platform's time-domain catalogue per axis, ranks by multiclass
@@ -56,7 +60,7 @@ shows it — no abbreviations** (e.g. "Linear Regression Slope", never "LR_SLOPE
   — magnitude features are direction-blind. **Linear Regression Slope/Intercept** are also orientation-invariant
   (survive per-class axis-sign flips across sessions) ([domain P-06](../../../wiki/principles/domain.md)). For a
   *dead* directional class, present this as part of a bundle (capacity + sharper data) and run the dead-class
-  ceiling check first (**diagnose-data**) so the fix isn't over-promised.
+  ceiling check first (**nrf-diagnose-data**) so the fix isn't over-promised.
 - **Impulse/shape** — **Crest Factor, Hjorth Mobility, Hjorth Complexity**. Sharp/impulsive classes (taps)
   that energy features miss.
 
@@ -79,5 +83,5 @@ shows it — no abbreviations** (e.g. "Linear Regression Slope", never "LR_SLOPE
 Plain language, concrete ("left and right collapse because the direction features are off — enable Linear
 Regression Slope and Linear Regression Intercept on these axes; your taps also need sharper motion, not just a
 feature change"). **Always use full platform feature names, never abbreviations.** Cite the feature/signal
-pages. Frame Cohen's-d numbers as indicative. Hand off to **collection-advice** when the real fix is better
-data, or **diagnose-data** for the full triage.
+pages. Frame Cohen's-d numbers as indicative. Hand off to **nrf-collection-advice** when the real fix is better
+data, or **nrf-diagnose-data** for the full triage.

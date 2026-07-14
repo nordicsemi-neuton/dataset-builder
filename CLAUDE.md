@@ -71,12 +71,17 @@ data/            ← Runtime data (configs, dictionaries, templates), if any app
   skill-presets/ (per-dataset profile schema + worked examples the user-facing skills load
                   then CONFIRM against the file — never auto-applied. Contract lives in
                   wiki/architecture/data-skill-preset-contract.md via implementation:.)
-scripts/         ← One-off/experimental scripts (draft code). As needed.
+scripts/         ← One-off/experimental scripts (draft code) — except the reference diagnostics the
+                   skills drive (validated through the task cycle, e.g. feature_separability.py via
+                   databuilder-005; treat those as shipped tooling, not draft).
+data-builder.py  ← Root launcher: a no-logic delegation shim into src/ (one cross-platform command
+                   form, no PYTHONPATH). Production code still lives in src/.
 .claude/skills/  ← The SHIPPED data-preparation assistant: one <slug>/SKILL.md per user-facing
-                   skill (prep-dataset, validate-upload, diagnose-data, collection-advice,
-                   feature-advice, build-dataset). Distinct from methodology/ (that is wiki-MAINTENANCE for
+                   skill (nrf-prep-dataset, nrf-validate-upload, nrf-diagnose-data, nrf-collection-advice,
+                   nrf-feature-advice, nrf-build-dataset). Distinct from methodology/ (that is wiki-MAINTENANCE for
                    Claude, not for the end user). Skills REFERENCE the wiki by path, never
-                   restate it. _shared/ holds the cited platform-contract.md digest. See
+                   restate it. _shared/ holds the cited platform-contract.md digest and runtime.md
+                   (environment setup + the per-OS command form the skills use). See
                    wiki/decisions/adr-0001-user-facing-skills-mechanism.md.
 CLAUDE.md        ← This file.
 STATE.md         ← Operational state (intentions, not facts; not canonical).

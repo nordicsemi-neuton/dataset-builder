@@ -1,7 +1,7 @@
 ---
 type: decision
 status: active
-updated: 2026-06-25
+updated: 2026-07-14
 sources:
   - ../../CLAUDE.md
   - ../architecture/platform-dataset-requirements.md
@@ -15,6 +15,18 @@ tags: [decision, skills, packaging, distribution, mechanism, user-facing]
 
 Status: active
 Date: 25.06.2026
+
+> **Amendment (14.07.2026):** after an owner field report of the skills degrading on Windows (the
+> prescribed engine command was POSIX-only), the shared-reference primitive was extended: `_shared/`
+> now holds **two** cited pages — `platform-contract.md` (platform facts, unchanged) and `runtime.md`
+> (environment setup, the per-OS command form, and the engine-is-a-black-box rules R1–R3) — and the
+> engine gained a root launcher, `data-builder.py`, as its user-facing invocation (one command form on
+> macOS/Linux/Windows, no `PYTHONPATH`; a no-logic shim into `src/`, twin of the pyproject console
+> script). Distributing via `pip install` was considered and rejected — an install step contradicts
+> the runs-from-source promise. The skills were also renamed with an `nrf-` prefix
+> (`nrf-prep-dataset`, `nrf-validate-upload`, `nrf-diagnose-data`, `nrf-collection-advice`,
+> `nrf-feature-advice`, plus `nrf-build-dataset` added after this ADR). Source: the skills-009
+> cross-platform-runtime spec (dev workspace; specs are not distributed).
 
 ## Context
 

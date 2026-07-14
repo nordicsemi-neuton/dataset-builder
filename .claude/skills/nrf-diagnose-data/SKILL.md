@@ -1,5 +1,5 @@
 ---
-name: diagnose-data
+name: nrf-diagnose-data
 description: >-
   Figure out why a user's data or trained model is misbehaving on Nordic Edge AI Lab, with the
   check-before-you-promise guardrails (dead-class ceiling, train/inference parity). Use when the user
@@ -26,10 +26,13 @@ class map / rate / durations as hypotheses ([process P-01/P-02/P-03](../../../wi
 ## 2. Profile first, then escalate
 
 Run the profiler (pass the user's real column names — the scripts default to `label`/`session_id`, but
-gesture data usually uses `class`):
+gesture data usually uses `class`). `<python>` = your Python 3.11+ interpreter — resolve it and check the
+environment per [_shared/runtime.md](../_shared/runtime.md) before the first run; the engine and
+`scripts/` are black boxes — if a command fails, fix the environment per runtime.md; never replace them
+with ad-hoc scripts or install anything beyond `requirements.txt`. From the repo root:
 
 ```
-python3 scripts/diagnostics/analyze_csv_signal.py <file.csv> --label-col class --session-col <s> --time-col <t>
+<python> scripts/diagnostics/analyze_csv_signal.py <file.csv> --label-col class --session-col <s> --time-col <t>
 ```
 
 Then pick the move that fits the symptom (cheapest first):
@@ -38,7 +41,7 @@ Then pick the move that fits the symptom (cheapest first):
 - **"is it centered?"** (before any feature analysis) → [`check_signal_centered.py`](../../../scripts/diagnostics/check_signal_centered.py).
 - **"a class is never predicted" / "left-right confused"** with a model archive →
   [`feature_mask_decoder.py`](../../../scripts/diagnostics/feature_mask_decoder.py) on `nrf_edgeai_user_model.c`
-  (are LR_SLOPE/LR_INTERCEPT off?). See **feature-advice**.
+  (are LR_SLOPE/LR_INTERCEPT off?). See **nrf-feature-advice**.
 - **"predictions uniformly wrong"** → [`windowed_feature_distribution_comparison.py`](../../../scripts/diagnostics/windowed_feature_distribution_comparison.py)
   (distribution shift / sampling-rate mismatch / gyro saturation).
 - **postprocessing questions** → [`postprocessing_pipelines.py`](../../../scripts/postprocessing/postprocessing_pipelines.py).
@@ -57,5 +60,5 @@ Then pick the move that fits the symptom (cheapest first):
 numbers from their data → numbered prioritised fixes, each citing the exact
 [platform rule](../../../wiki/architecture/platform-dataset-requirements.md) → secondary issues →
 collaborative tone. Mark experiential heuristics as "from experience, verify" — not platform law. Hand off
-to **prep-dataset** (re-assemble), **collection-advice** (collect better data), or **feature-advice**
+to **nrf-prep-dataset** (re-assemble), **nrf-collection-advice** (collect better data), or **nrf-feature-advice**
 (feature/window settings) as the fix requires.

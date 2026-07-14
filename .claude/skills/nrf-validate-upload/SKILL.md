@@ -1,5 +1,5 @@
 ---
-name: validate-upload
+name: nrf-validate-upload
 description: >-
   The pre-upload gate: check whether a CSV will be accepted by the Nordic Edge AI Lab platform and
   whether it will silently lose data, returning PASS / FIX-REQUIRED / WILL-LOSE-DATA with each problem
@@ -26,9 +26,13 @@ intended window, and whether frequency-domain features will be on). Reconcile it
 
 ## 2. Run the check
 
+`<python>` = your Python 3.11+ interpreter — resolve it and check the environment per
+[_shared/runtime.md](../_shared/runtime.md) before the first run. The engine and `scripts/` are black
+boxes — if a command fails, fix the environment per runtime.md; never replace them with ad-hoc scripts or
+install anything beyond `requirements.txt`. From the repo root:
+
 ```
-PYTHONPATH=src python3 -m data_builder.cli validate <file.csv> \
-    --profile output/<name>.profile.json --window <N> [--holdout <holdout.csv>] [--json]
+<python> data-builder.py validate <file.csv> --profile output/<name>.profile.json --window <N> [--holdout <holdout.csv>] [--json]
 ```
 
 The verdict and exit code: `0` = PASS, `2` = FIX_REQUIRED (the platform would reject it or a value must be
@@ -46,5 +50,5 @@ why, and which items are hard platform rules vs recommendations.
 ## Guardrails
 - Frame window-survival losses as "verify against the platform's Processed Data view", never as a guarantee.
 - Distinguish a hard reject (must fix) from an advisory (better model) explicitly.
-- If a fix means re-assembling the file, hand off to **prep-dataset**; if it means understanding *why* a
-  class behaves badly, hand off to **diagnose-data** / **feature-advice**.
+- If a fix means re-assembling the file, hand off to **nrf-prep-dataset**; if it means understanding *why* a
+  class behaves badly, hand off to **nrf-diagnose-data** / **nrf-feature-advice**.

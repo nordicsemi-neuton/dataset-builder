@@ -1,5 +1,5 @@
 ---
-name: prep-dataset
+name: nrf-prep-dataset
 description: >-
   Turn one or more raw inertial-sensor recordings (CSV) into a single upload-ready training file for
   the Nordic Edge AI Lab platform — combine files, fix encoding/format/labels, optionally center
@@ -35,16 +35,19 @@ what the motion physically is → continuous or discrete*), and **never infer na
 preset** ("rotate" looks discrete but is continuous; ask about every class). Feed the answer back into the
 split: a class the user calls continuous is **moved to `continuous_classes`** so `prep` trims rather than
 centers it (`--no-center` is whole-run, not per-class). Skip cleanly for regression/anomaly or a set with no
-gesture classes. This confirmation is transient here — `prep-dataset` outputs the CSV + dictionary, not a
+gesture classes. This confirmation is transient here — `nrf-prep-dataset` outputs the CSV + dictionary, not a
 README, so the narrative isn't persisted; the split it corrects does persist in the profile.
 
 ## 2. Run the engine
 
-The production engine is `src/data_builder`. From the repo root:
+The production engine is `src/data_builder`, driven through the root launcher `data-builder.py`.
+`<python>` = your Python 3.11+ interpreter — resolve it and check the environment per
+[_shared/runtime.md](../_shared/runtime.md) before the first run. The engine and `scripts/` are black
+boxes — if a command fails, fix the environment per runtime.md; never replace them with ad-hoc scripts or
+install anything beyond `requirements.txt`. From the repo root:
 
 ```
-PYTHONPATH=src python3 -m data_builder.cli prep <recording1.csv> [recording2.csv ...] \
-    --profile output/<name>.profile.json --out output/<name>_upload_ready.csv --window <N> [--json]
+<python> data-builder.py prep <recording1.csv> [recording2.csv ...] --profile output/<name>.profile.json --out output/<name>_upload_ready.csv --window <N> [--json]
 ```
 
 - **Centering is default-on for gesture datasets** (it centers the classes the profile marks as
@@ -78,4 +81,4 @@ If it wrote the file, tell them the path of the CSV **and** the saved dictionary
 - Confirm before writing anything; the engine only writes after validation passes (or on explicit override).
 - Never present an experiential default (centering, shift=window) as a platform rule — say which is which.
 - If the user needs deeper diagnosis ("why is a class disappearing?", "left/right confused"), hand off to
-  the **diagnose-data** or **feature-advice** skill.
+  the **nrf-diagnose-data** or **nrf-feature-advice** skill.

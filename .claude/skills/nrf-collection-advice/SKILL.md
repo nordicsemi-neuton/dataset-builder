@@ -1,5 +1,5 @@
 ---
-name: collection-advice
+name: nrf-collection-advice
 description: >-
   Advise how much inertial-sensor data to collect and how to record, label, and clean it for a Nordic
   Edge AI Lab model — including tricks to fix a weak class at the source. Use when the user asks "how much
@@ -25,7 +25,7 @@ than reciting from memory; label each figure as platform-guidance or experience.
 **Recording technique:** include an **idle** class and an **"unknown" / none-of-the-above** class populated
 with the user's real non-target activities — without a catch-all, every input is forced into a gesture and
 you get constant false detections ([domain P-10](../../../wiki/principles/domain.md)). Vary speed,
-orientation, and intensity. One class per file, then combine (the **prep-dataset** skill does the combine).
+orientation, and intensity. One class per file, then combine (the **nrf-prep-dataset** skill does the combine).
 
 **Labeling & encoding:** target contiguous from 0, ≥2 classes, ≥20 samples each
 ([contract](../_shared/platform-contract.md)); keep recordings time-ordered, one row per sample.
@@ -34,7 +34,7 @@ orientation, and intensity. One class per file, then combine (the **prep-dataset
 
 **Weak-class tricks (tie to the symptom):**
 - direction class confused (left/right) → exaggerate the motion AND enable LR_SLOPE/LR_INTERCEPT
-  ([domain P-06](../../../wiki/principles/domain.md)); see **feature-advice**.
+  ([domain P-06](../../../wiki/principles/domain.md)); see **nrf-feature-advice**.
 - a class disappears at windowing → record longer continuous runs per gesture, at least as long as the
   window ([domain P-01](../../../wiki/principles/domain.md)).
 - false triggers in normal use → grow the "unknown" class with the activities that misfire, then retrain
@@ -42,5 +42,5 @@ orientation, and intensity. One class per file, then combine (the **prep-dataset
 
 ## Reply
 Plain language, organised by the user's actual question. Each number tagged platform-guidance vs
-experience. If the real fix is in the data already collected, hand off to **diagnose-data**; if it's about
-feature settings, hand off to **feature-advice**.
+experience. If the real fix is in the data already collected, hand off to **nrf-diagnose-data**; if it's about
+feature settings, hand off to **nrf-feature-advice**.

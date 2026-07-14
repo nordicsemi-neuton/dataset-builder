@@ -1,5 +1,7 @@
 # Package metadata for data-builder.
-# The tool runs from source (PYTHONPATH=src); this file declares the package, its
+# The tool runs from source — user-facing path is the root launcher (data-builder.py);
+# PYTHONPATH=src remains the dev/test form. The [project.scripts] console script below is
+# the installed twin of the same entry point. This file declares the package, its
 # dependencies, and the supported Python range so installs and tooling are reproducible.
 [build-system]
 requires = ["setuptools>=68"]

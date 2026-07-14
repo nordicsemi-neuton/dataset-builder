@@ -32,3 +32,60 @@ jobs:
 
       - name: Run test suite
         run: PYTHONPATH=src python3 -m unittest discover -s src/tests -v
+
+  windows-smoke:
+    name: Windows smoke (launcher + suite)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Launcher help
+        shell: bash
+        run: python data-builder.py validate --help
+
+      # No CSV ships in the public repo (output/ and raw/samples/ never ship), so the
+      # fixtures are synthesized here against the shipped demo profile (window 99):
+      # good = 8 classes x 120 contiguous rows (survives windowing), bad = one class
+      # with < 20 samples (class_below_min_samples, HARD-REJECT => exit 2).
+      - name: Synthesize fixtures
+        shell: bash
+        run: python -c "import csv; g=open('good.csv','w',newline=''); w=csv.writer(g); w.writerow(['acc_x','acc_y','acc_z','gyro_x','gyro_y','gyro_z','class']); [w.writerow([((r*7+c*13+a)%2000)-1000 for a in range(6)]+[c]) for c in range(8) for r in range(120)]; g.close(); b=open('bad.csv','w',newline=''); w=csv.writer(b); w.writerow(['acc_x','acc_y','acc_z','gyro_x','gyro_y','gyro_z','class']); [w.writerow([((r*7+c*13+a)%2000)-1000 for a in range(6)]+[c]) for c in range(8) for r in range(10 if c==7 else 120)]; b.close()"
+
+      - name: Validate good fixture (expect exit 0)
+        shell: bash
+        run: python data-builder.py validate good.csv --profile data/skill-presets/nordic-gesture-demo.json
+
+      - name: Validate bad fixture (expect exit 2)
+        shell: bash
+        run: |
+          set +e
+          python data-builder.py validate bad.csv --profile data/skill-presets/nordic-gesture-demo.json
+          code=$?
+          set -e
+          test "$code" -eq 2
+
+      - name: Validate nonexistent path (expect exit 4)
+        shell: bash
+        run: |
+          set +e
+          python data-builder.py validate no_such_file.csv --profile data/skill-presets/nordic-gesture-demo.json
+          code=$?
+          set -e
+          test "$code" -eq 4
+
+      - name: Run test suite
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s src/tests -v

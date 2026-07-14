@@ -14,7 +14,7 @@
 
 ## decisions
 
-- [ADR-0001 — User-facing capabilities ship as Skills](decisions/adr-0001-user-facing-skills-mechanism.md) — skills (not instructions/presets) are the surface; presets = confirm-first data; instructions = one shared cited reference; the 5-skill catalog. _Updated: 2026-06-25_
+- [ADR-0001 — User-facing capabilities ship as Skills](decisions/adr-0001-user-facing-skills-mechanism.md) — skills (not instructions/presets) are the surface; presets = confirm-first data; instructions = shared cited references (platform-contract.md + runtime.md since the 14.07.2026 amendment); the skill catalog (nrf- prefixed) + the data-builder.py launcher. _Updated: 2026-07-14_
 - [ADR-0002 — data-builder engine architecture](decisions/adr-0002-data-builder-engine-architecture.md) — two-layer validation (raw-bytes + dataframe), Finding/Report/verdict taxonomy, refuse-on-loss, flag-never-truncate, numpy/pandas-only (scipy on resample path since ADR-0003). _Updated: 2026-07-13_
 - [ADR-0003 — scipy.signal on the resampling path (amends ADR-0002)](decisions/adr-0003-scipy-on-resample-path.md) — permit scipy.signal.decimate/resample_poly in resample.py for anti-aliasing; the bare np.interp downsample silently aliases; scipy kept to that one path. _Updated: 2026-07-13_
 
@@ -35,4 +35,4 @@
 ## principles
 
 - [Domain principles — inertial data prep & modeling](principles/domain.md) — P-01..P-15: window survival, training/inference shift, contiguous labels, single sampling rate, centering, direction features, postprocessing ceiling, EMA default, preprocessing parity, idle/unknown class, sensor-scale reconciliation, measured feature enable-set, metric is evaluation-only, resampling decision procedure (anti-alias/measure-first), physical-meaning gate before centering. _Updated: 2026-07-13_
-- [Process principles — how to diagnose a user's problem](principles/process.md) — P-01..P-08: read both halves, profile first, reconcile claims vs data, simulate, ceiling/parity checks, confirm protocol, reply structure, skills-reference-wiki-by-path. _Updated: 2026-06-25_
+- [Process principles — how to diagnose a user's problem](principles/process.md) — P-01..P-10: read both halves, profile first, reconcile claims vs data, simulate, ceiling/parity checks, confirm protocol, reply structure, skills-reference-wiki-by-path, one-deliverable-folder, cross-platform commands. _Updated: 2026-07-14_

@@ -5,7 +5,7 @@
 [![Platform: Nordic Edge AI Lab](https://img.shields.io/badge/platform-Nordic%20Edge%20AI%20Lab-00A9CE)](https://ai.lab.nordicsemi.com)
 [![Docs](https://img.shields.io/badge/docs-edge--ai--lab-00A9CE)](https://docs.nordicsemi.com/bundle/edge-ai-lab/page/index.html)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-91%20passing-brightgreen)](src/tests/)
+[![Tests](https://img.shields.io/badge/tests-100%20passing-brightgreen)](src/tests/)
 
 > Clone it, point it at your raw CSVs, and get back a single training file that the platform will actually accept — plus an honest report of anything that would be silently dropped before you upload.
 
@@ -16,11 +16,11 @@
 New here? You don't need to read the rest of this page to get a working dataset. Just:
 
 1. **Download this repo** — click the green **Code** button at the top of this page → **Download ZIP** → unzip it to a folder on your computer.
-2. **Open that folder in [Claude Code](https://claude.com/claude-code)** — it comes as a VS Code / JetBrains extension, a Mac/Windows desktop app, or online at [claude.ai/code](https://claude.ai/code). Just point it at this folder.
+2. **Open that folder in [Claude Code](https://claude.com/claude-code)** — it comes as a VS Code / JetBrains extension, a Mac/Windows desktop app, or online at [claude.ai/code](https://claude.ai/code). Just point it at this folder. We've been testing this assistant with the **Claude Opus 4.8** model, so pick it if it's available to you.
 3. **Send one message** to start the guided, start-to-finish preparation — pointing it at wherever your sensor recordings are saved on your computer:
 
    ```
-   /build-dataset use the data in this directory: /Users/you/Downloads/data
+   /nrf-build-dataset use the data in this directory: /Users/you/Downloads/data
    ```
 
 4. **Let it guide you.** It looks through your recordings, explains what it finds in plain language, asks you a few simple questions along the way, fixes the formatting the platform requires, and checks that nothing will be quietly dropped.
@@ -57,6 +57,7 @@ That makes the repo a **starting point you can grow**: download it, use it, and 
 
 ```
 dataset-builder/
+├── data-builder.py     The launcher — one command form on macOS, Linux, and Windows
 ├── src/data_builder/   The engine — CSV intake → analysis → preprocessing → validation → export
 ├── .claude/skills/     The AI assistant — conversational, confirm-first data-prep skills
 ├── scripts/            Standalone diagnostic & preprocessing scripts (numpy + pandas, or drop-in C)
@@ -72,14 +73,14 @@ The single source of truth for the platform's input rules lives in [`wiki/archit
 
 ## Requirements
 
-- **Python 3.9+**
-- **numpy** and **pandas** (the only runtime dependencies)
+- **Python 3.11+** (on Windows the interpreter is usually `python` or `py -3`; on macOS/Linux it's `python3`)
+- **numpy**, **pandas**, and **scipy** (scipy is used only for anti-alias downsampling)
 
 ```bash
-python3 -m pip install numpy pandas
+python3 -m pip install -r requirements.txt
 ```
 
-No build or install step — the engine runs straight from the source tree.
+No build step — the engine runs straight from the source tree (just the one pinned dependency install above).
 
 ---
 
@@ -89,13 +90,16 @@ From the repo root:
 
 ```bash
 # 1. Validate a CSV against the platform contract before uploading
-PYTHONPATH=src python3 -m data_builder.cli validate my_data.csv \
-    --profile data/skill-presets/nordic-gesture-demo.json
+python3 data-builder.py validate my_data.csv --profile data/skill-presets/nordic-gesture-demo.json
 
 # 2. Combine raw recordings into one upload-ready training file
-PYTHONPATH=src python3 -m data_builder.cli prep recording1.csv recording2.csv \
-    --profile data/skill-presets/nordic-gesture-demo.json \
-    --out output/training.csv
+python3 data-builder.py prep recording1.csv recording2.csv --profile data/skill-presets/nordic-gesture-demo.json --out output/training.csv
+```
+
+On Windows, the same commands with your interpreter name:
+
+```powershell
+python data-builder.py validate my_data.csv --profile data/skill-presets/nordic-gesture-demo.json
 ```
 
 A **dataset profile** (a small JSON file) tells the engine your column names, sampling rate, units, label encoding, and window size. Start from the schema and the worked example:
@@ -121,14 +125,13 @@ Copy the example, then edit every field to match your actual file — the demo n
 
 ```bash
 # Resample mixed-rate recordings to 100 Hz and assemble, skipping centering
-PYTHONPATH=src python3 -m data_builder.cli prep session_*.csv \
-    --profile my_profile.json --out output/training.csv \
-    --resample 100 --no-center
+python3 data-builder.py prep session_1.csv session_2.csv session_3.csv --profile my_profile.json --out output/training.csv --resample 100 --no-center
 
 # Compare sources to spot an outlier recording before you train
-PYTHONPATH=src python3 -m data_builder.cli quality-report user_*.csv \
-    --profile my_profile.json
+python3 data-builder.py quality-report user_a.csv user_b.csv --profile my_profile.json
 ```
+
+List input files explicitly — the engine does not expand wildcards itself, and Windows shells don't expand `*.csv` for it either.
 
 ### Run the tests
 
@@ -140,16 +143,16 @@ PYTHONPATH=src python3 -m unittest discover -s src/tests -v
 
 ## The AI assistant (skills)
 
-If you use [Claude Code](https://claude.com/claude-code), this repo ships six conversational skills under [`.claude/skills/`](.claude/skills/) that drive the engine for you and explain each step. They **never auto-apply** changes — they show you the evidence and confirm before acting.
+If you use [Claude Code](https://claude.com/claude-code), this repo ships six conversational skills under [`.claude/skills/`](.claude/skills/) that drive the engine for you and explain each step. They **never auto-apply** changes — they show you the evidence and confirm before acting. We've been testing this assistant using the **Claude Opus 4.8** model.
 
 | Skill | Use it when you want to… |
 |---|---|
-| **build-dataset** | Be guided end-to-end from raw recordings to a validated, upload-ready file. |
-| **prep-dataset** | Combine, fix, center, or resample recordings into one training CSV. |
-| **validate-upload** | Gate-check a CSV: *"will the platform accept this, and will it lose data?"* |
-| **diagnose-data** | Find out why data is removed, a class is never predicted, or gestures are confused. |
-| **collection-advice** | Decide how much data to collect and how to record, label, and clean it. |
-| **feature-advice** | Choose which platform features and window settings make classes separate. |
+| **nrf-build-dataset** | Be guided end-to-end from raw recordings to a validated, upload-ready file. |
+| **nrf-prep-dataset** | Combine, fix, center, or resample recordings into one training CSV. |
+| **nrf-validate-upload** | Gate-check a CSV: *"will the platform accept this, and will it lose data?"* |
+| **nrf-diagnose-data** | Find out why data is removed, a class is never predicted, or gestures are confused. |
+| **nrf-collection-advice** | Decide how much data to collect and how to record, label, and clean it. |
+| **nrf-feature-advice** | Choose which platform features and window settings make classes separate. |
 
 ---
 

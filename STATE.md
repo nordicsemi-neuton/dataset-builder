@@ -10,7 +10,7 @@ _Updated: 2026-07-14_
 
 Fresh copy of the data-builder tool, ready to prepare inertial-sensor data for the Nordic Edge AI
 Lab platform. Drop your recordings in `input/` and ask to prepare them, or use a skill in
-`.claude/skills/` (start with build-dataset for the guided end-to-end flow).
+`.claude/skills/` (start with nrf-build-dataset for the guided end-to-end flow).
 
 ## Path to goal
 

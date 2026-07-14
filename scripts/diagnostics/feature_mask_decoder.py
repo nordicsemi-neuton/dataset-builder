@@ -20,6 +20,15 @@ import re
 import sys
 from pathlib import Path
 
+# Windows consoles/pipes default to cp1252, which cannot encode every character in
+# this tool's output; degrade to '?' instead of crashing (no-op on UTF-8 terminals).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
 
 # Bit position -> feature name (matches NRF_EDGEAI_FEATURE_TIMEDOMAIN enum order)
 TIME_FEATURES = [

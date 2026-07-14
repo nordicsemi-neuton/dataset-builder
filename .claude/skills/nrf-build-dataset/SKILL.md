@@ -1,5 +1,5 @@
 ---
-name: build-dataset
+name: nrf-build-dataset
 description: >-
   Guide the user end-to-end from raw inertial-sensor recordings to an upload-ready, centered, validated
   dataset for the Nordic Edge AI Lab platform — one conducted flow that pauses at each step to show
@@ -17,7 +17,11 @@ number as a platform rule. Reuse the focused skills and the engine — don't rei
 is in [_shared/platform-contract.md](../_shared/platform-contract.md) (canonical:
 [wiki/architecture/platform-*](../../../wiki/architecture/platform-dataset-requirements.md)); cite it.
 
-Engine commands (run from the repo root): `PYTHONPATH=src python3 -m data_builder.cli <prep|validate|quality-report> … [--json]`.
+Engine commands (run from the repo root): `<python> data-builder.py <prep|validate|quality-report> … [--json]`.
+`<python>` = your Python 3.11+ interpreter — resolve it and check the environment per
+[_shared/runtime.md](../_shared/runtime.md) before the first run. The engine and `scripts/` are black
+boxes — if a command fails, fix the environment per runtime.md; never replace them with ad-hoc scripts or
+install anything beyond `requirements.txt`.
 
 ## Stage 0 — Frame the data (reconcile, don't assume)
 
@@ -64,7 +68,7 @@ Profile the data and **look for a source collected differently from the rest** �
 people contributed and one did it wrong" case:
 
 ```
-PYTHONPATH=src python3 -m data_builder.cli quality-report <file...> --profile output/<name>.profile.json --json
+<python> data-builder.py quality-report <file...> --profile output/<name>/profile.json --json
 ```
 
 (Each input file is treated as a source; or a session column if it's one file.) Also run
@@ -74,7 +78,7 @@ show the evidence (which source, which class, the d-value, the axes it differs o
 cause ("source C's *swipe* sits ~3 std from everyone else's *swipe* — probably recorded with a different
 orientation or device"), and **suggest options — exclude that portion / re-collect it / keep it — then let
 the user decide.** Frame Cohen's-d as *indicative*, not pass/fail ([case patterns](../../../wiki/synthesis/support-case-patterns.md)).
-If a class is short or thin, surface it now and offer [collection-advice](../collection-advice/SKILL.md).
+If a class is short or thin, surface it now and offer [nrf-collection-advice](../nrf-collection-advice/SKILL.md).
 
 ## Stage 2 — Clean & assemble
 
@@ -100,7 +104,7 @@ numbers, **try a couple of window sizes and recommend the best**, but **let the 
 honestly that a discrete gesture with no clear peak may be a *data* problem (weak/inconsistent gestures →
 recollect), not a parameter to tune around ([process P-05 / domain P-07](../../../wiki/principles/process.md)).
 Never tune the window to force a continuous class to center. Hand off to
-[feature-advice](../feature-advice/SKILL.md) if direction/separability is the concern.
+[nrf-feature-advice](../nrf-feature-advice/SKILL.md) if direction/separability is the concern.
 
 ## Stage 4 — Resample (only if needed)
 
@@ -113,10 +117,10 @@ the one final export run, not a pass over an already-processed file — so carry
 
 The platform extracts features itself, but **which families are enabled is the user's lever** — so produce an
 **evidence-backed full enable-set**, not one or two asserted features ([domain P-12](../../../wiki/principles/domain.md),
-[feature-advice](../feature-advice/SKILL.md)). Run the deterministic diagnostic on the centered output:
+[nrf-feature-advice](../nrf-feature-advice/SKILL.md)). Run the deterministic diagnostic on the centered output:
 
 ```
-python3 scripts/diagnostics/feature_separability.py output/<name>/<name>.csv --profile output/<name>/profile.json
+<python> scripts/diagnostics/feature_separability.py output/<name>/<name>.csv --profile output/<name>/profile.json
 ```
 
 It windows each class, computes the time-domain catalogue per axis, ranks by separation, flags **magnitude-blind
@@ -155,13 +159,13 @@ overlap), **inference shift at 50–70% overlap** ([domain P-02](../../../wiki/p
 type, and the **measured feature enable-set from Stage 5** — and one line on what each other file is for.
 **Close by pointing the user to that `README.md`** as the place with all the details, and briefly note that
 **if they later have separate validation data, you can compare it to the training data, run the
-inference-runner, and report validation details**. Reuses [prep-dataset](../prep-dataset/SKILL.md) /
-[validate-upload](../validate-upload/SKILL.md).
+inference-runner, and report validation details**. Reuses [nrf-prep-dataset](../nrf-prep-dataset/SKILL.md) /
+[nrf-validate-upload](../nrf-validate-upload/SKILL.md).
 
 ## Stage 7 — After they train (optimization & validation)
 
 Once they've trained and **tested in real conditions**, help interpret results: dead classes / confusion
-([diagnose-data](../diagnose-data/SKILL.md)), and — only now, if optimization is needed — advise re-running
+([nrf-diagnose-data](../nrf-diagnose-data/SKILL.md)), and — only now, if optimization is needed — advise re-running
 the **same experiment with feature-selection on** to prune for size ([domain P-12](../../../wiki/principles/domain.md)).
 If they have **separate validation data**, compare its feature distribution to the training classes and run
 the inference-runner to report real-world accuracy. **Note:** the platform extracts/selects features itself —

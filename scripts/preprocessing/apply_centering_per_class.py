@@ -63,6 +63,15 @@ from pathlib import Path
 
 import pandas as pd
 
+# Windows consoles/pipes default to cp1252, which cannot encode every character in
+# this tool's output; degrade to '?' instead of crashing (no-op on UTF-8 terminals).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
 
 REQUIRED_COLUMNS = ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z", "class"]
 

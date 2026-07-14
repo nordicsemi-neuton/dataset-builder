@@ -20,6 +20,15 @@ import sys
 import numpy as np
 import pandas as pd
 
+# Windows consoles/pipes default to cp1252, which cannot encode every character in
+# this tool's output; degrade to '?' instead of crashing (no-op on UTF-8 terminals).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
 
 def simulate(df, label_col, session_col, window, shift):
     counts = {l: 0 for l in sorted(df[label_col].unique())}

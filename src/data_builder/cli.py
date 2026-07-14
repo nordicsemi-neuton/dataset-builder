@@ -16,6 +16,15 @@ from . import validate as validate_mod
 from . import pipeline as pipeline_mod
 from . import quality as quality_mod
 
+# Windows consoles/pipes default to cp1252, which cannot encode every character in
+# this tool's output; degrade to '?' instead of crashing (no-op on UTF-8 terminals).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
 
 def _load_profile(path: str) -> DatasetProfile:
     try:

@@ -16,6 +16,7 @@ authors = [{ name = "Nordic Semiconductor ASA" }]
 dependencies = [
     "numpy>=2.0",
     "pandas>=2.2",
+    "scipy>=1.13",  # resampling path only (anti-alias downsampling, ADR-0003)
 ]
 
 [project.urls]

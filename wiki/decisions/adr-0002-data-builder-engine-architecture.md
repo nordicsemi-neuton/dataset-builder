@@ -1,9 +1,10 @@
 ---
 type: decision
 status: active
-updated: 2026-06-25
+updated: 2026-07-13
 sources:
   - ../architecture/platform-dataset-requirements.md
+  - ./adr-0003-scipy-on-resample-path.md
 tags: [decision, architecture, data-builder, pipeline, validation, engine]
 ---
 
@@ -11,6 +12,10 @@ tags: [decision, architecture, data-builder, pipeline, validation, engine]
 
 Status: active
 Date: 25.06.2026
+
+> **Amendment (13.07.2026):** the "numpy/pandas-only (no scipy)" constraint below is **narrowed** by
+> [ADR-0003](adr-0003-scipy-on-resample-path.md) — `scipy.signal` is permitted on the resampling path
+> (`resample.py`) for anti-aliasing. Everything else in this ADR stands (pytest/jsonschema still rejected).
 
 ## Context
 

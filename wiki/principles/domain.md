@@ -1,9 +1,10 @@
 ---
 type: principles
 status: active
-updated: 2026-07-10
+updated: 2026-07-13
 sources:
   - Field experience (practitioner knowledge; no external source document).
+  - ../../raw/harvested-practice/2026-07-13-resampling-decision-procedure.md
   - ../../scripts/diagnostics/window_survival_sim.py
   - ../../scripts/diagnostics/feature_mask_decoder.py
   - ../../scripts/preprocessing/center_training_data.py
@@ -41,10 +42,10 @@ Rules drawn from field experience with common data-prep scenarios. These are **e
 
 ## P-04 — One sampling rate across all sessions; resample before upload
 
-**Rule:** Ensure every session shares a single sampling rate; resample (up/down) to a common Hz before upload, and always record the rate.
+**Rule:** Ensure every session shares a single sampling rate; resample to a common Hz before upload, and always record the rate. **Measure the actual rate from timestamps** (`1/median(diff(t))`) — do not trust the nominal rate in metadata (real logs jitter, and the true rate often drifts from the declared one). Prefer the **lowest common rate that still clears Nyquist** for the signal and **downsample** toward it; **never upsample low-rate files just to match high-rate ones** (that fabricates resolution the sensor never captured). *How* to resample safely — anti-aliasing, jitter handling, method choice, validation — is [P-14](#p-14--resampling-is-a-decision-procedure-measure-first-anti-alias-before-downsampling-validate).
 **Why:** The window is defined in rows, so mixed sampling rates mean the same window covers different physical durations per session → inconsistent features for the same gesture.
 **Precedent:** one dataset mixed sessions at 244 Hz and 199 Hz; window=150 then meant 0.62 s vs 0.75 s.
-**Source:** field experience (practitioner knowledge); [`analyze_csv_signal.py`](../../scripts/diagnostics/analyze_csv_signal.py).
+**Source:** field experience (practitioner knowledge); [`analyze_csv_signal.py`](../../scripts/diagnostics/analyze_csv_signal.py). Directional/anti-alias sharpening: embedded-engineer notes ([raw](../../raw/harvested-practice/2026-07-13-resampling-decision-procedure.md), 13.07.2026).
 
 ## P-05 — Center discrete gestures; keep continuous classes raw; never center across class boundaries
 
@@ -144,3 +145,32 @@ still gives more total gradient mass to the frequent classes, so imbalance remai
 concern; only the "changing the metric will fix it" mechanism was wrong.
 **Source:** this session (10.07.2026); owner-supplied platform knowledge (direct, not from the doc bundle).
 Related: [P-12](#p-12--recommend-the-feature-enable-set-from-a-measured-separability-pass-and-what-to-hold-back).
+
+## P-14 — Resampling is a decision procedure: measure first, anti-alias before downsampling, validate
+
+**Rule:** Treat resampling as a *decision procedure*, not a single interpolation call. First separate two problems that both appear in real logs and need different handling:
+
+- **Different nominal rates** across files (e.g. some at 100 Hz, some at 128 Hz) → *rational resampling* to a common rate.
+- **Non-uniform / jittery timestamps** (jitter, dropped samples, a real rate that drifts from the nominal) → *interpolation onto a uniform grid at the true times*.
+
+Almost every real dataset has **both**, so **step 1 is always to measure the actual rate from timestamps (`1/median(diff(t))`) and check uniformity** — never trust the nominal rate ([P-04](#p-04--one-sampling-rate-across-all-sessions-resample-before-upload)). Then apply, in order:
+
+1. **Target rate = lowest common rate that still clears Nyquist** for the signal (human-motion energy is mostly < ~15–20 Hz; sharp taps/impacts reach ~50 Hz, so 50–100 Hz has margin). **Downsample high-rate files toward it; never upsample low-rate files for "uniformity"** — you cannot restore information the sensor never captured, only fabricate its illusion.
+2. **Downsampling requires an anti-alias filter *before* decimation.** Taking every N-th sample — or interpolating straight onto the coarse grid, which is what a plain `numpy.interp` does — folds frequencies above the new Nyquist back into the band (aliasing) and silently corrupts the platform's statistical features (it looks like mysteriously degraded features on classification). Use `scipy.signal.decimate` (integer factor) or `resample_poly` (fractional); both filter internally ([ADR-0003](../decisions/adr-0003-scipy-on-resample-path.md) permits scipy on this path).
+3. **Order of operations for non-uniform data being downsampled** (easy to violate): interpolate onto a uniform grid **at the source (high) rate first**, *then* anti-alias + `resample_poly` down to the target. Interpolating directly onto the low grid skips the anti-aliasing entirely.
+4. **Upsampling = interpolation + imaging protection.** `resample_poly` is spectrally cleaner than a spline; a **cubic spline overshoots on sharp peaks**, so for impact/shock gestures prefer **linear** interpolation, and poly/sinc for smooth signals.
+5. **Keep labels in time (seconds), not row indices,** and resample every channel on the **one** grid (axis sync). Recompute event boundaries at the end (`new_index = round(t_sec · target_rate)`); our engine already achieves this by resampling per contiguous same-label run and re-labeling the new grid — preserve that.
+6. **Validate every file after resampling:** duration preserved (`n_new ≈ duration · target_rate`); PSD before/after shows no energy above the new Nyquist after a downsample; a visual overlay of a signal slice; labels still land on real events. **Record per file:** measured source rate, target rate, method, filter params, and direction (up/down) — for reproducibility.
+
+**Why:** Aliasing from unfiltered decimation is invisible in the CSV but shows up as degraded features and accuracy — the worst kind of silent corruption for a tool shipped to third parties (the exact failure [ADR-0002](../decisions/adr-0002-data-builder-engine-architecture.md) refuses to ship). Upsampling for uniformity manufactures data; getting the operation order wrong disables the anti-aliasing you added. These are standard DSP facts, not platform rules.
+**When to apply:** any dataset with mixed or jittery sampling rates; before choosing a window size (counted in samples, so it depends on the final rate); designing or reviewing the resampling path in [`resample.py`](../../src/data_builder/resample.py).
+**Precedent:** an embedded engineer's review of the current `resample.py`, which resampled via a bare `numpy.interp` straight onto the target grid — correct for upsampling and label alignment, but with **no anti-aliasing on the downsample path** (silent aliasing) and no rate-measurement / jitter / provenance step. Drove [ADR-0003](../decisions/adr-0003-scipy-on-resample-path.md) and spec [databuilder-008](../../specs/databuilder-008-resampling-antialias.md).
+**Source:** embedded-engineer notes ([raw](../../raw/harvested-practice/2026-07-13-resampling-decision-procedure.md)); this session (13.07.2026). Related: [P-04](#p-04--one-sampling-rate-across-all-sessions-resample-before-upload), [signal-processing contract](../architecture/platform-signal-processing.md).
+
+## P-15 — Establish each class's real-world physical meaning before any class-nature-dependent step
+
+**Rule:** Before centering — or any step that depends on *what a class is* — get the user to state, in plain physical terms, the real-world motion each class represents, and confirm it in one batched pass (a table: *class → physical description → continuous or discrete*). This human-confirmed meaning is the required input **upstream of three later decisions, not one**: the continuous/discrete centering split ([P-05](#p-05--center-discrete-gestures-keep-continuous-classes-raw-never-center-across-class-boundaries)); whether opposite/mirror pairs exist that need the signed **direction features** ([P-06](#p-06--direction-discrimination-requires-lr_slope--lr_intercept-the-only-signed-asymmetry-features) / [P-11](#p-11--reconcile-sensor-scale-across-sources-gravity-at-rest-is-the-probe-but-motion-invalidates-it)); and whether an **idle/"unknown"** class is present ([P-10](#p-10--always-include-an-idle--unknown-class-to-prevent-false-detections)). **Never infer a class's nature from its filename, its column name, or a demo/example preset** — a class named "rotate" reads like a discrete gesture but is a continuous stream, and you cannot pre-judge which names mislead without the description, which is why you ask about *every* class, not only the suspicious ones. Make the confirmation **structural** (an explicit stop the flow cannot skip, echoed back for approval), because the failure mode is a *glossed* gate, not a missing one.
+**Why:** Centering is default-on and class-nature-dependent: send a continuous class into it and its "peak" never sits mid-window (P-05); miss a mirror pair and the direction features that separate it are never enabled (P-06/P-11); forget the idle/unknown design and you invite false detections (P-10). All of that is decided from the physical meaning, so getting the meaning wrong silently poisons the split, the feature recommendation, and the false-detection design at once — the worst kind of error for a tool shipped to third parties.
+**When to apply:** any classification/gesture dataset before centering or feature-separability analysis; whenever a profile arrives with a `gesture_classes`/`continuous_classes` split already filled in (confirm it, do not trust it). Not applicable to regression (no classes) or anomaly detection (unlabeled) — skip cleanly.
+**Precedent:** a real `build-dataset` run centered a dataset without ever asking the physical meaning of each class or the continuous/discrete split — the Stage 0 "hard gate" existed only as prose and was walked past to the auto-centering `prep`. Drove [skills-007](../../specs/skills-007-class-nature-gate.md): the gate became a structural always-stop with a batched echo-back, the same confirmation was added to `prep-dataset`, and this rule — previously only in `build-dataset` skill prose (`SKILL.md:41`) — was lifted into the wiki here.
+**Source:** this session (13.07.2026); [skills-007](../../specs/skills-007-class-nature-gate.md). Related: [P-05](#p-05--center-discrete-gestures-keep-continuous-classes-raw-never-center-across-class-boundaries), [P-06](#p-06--direction-discrimination-requires-lr_slope--lr_intercept-the-only-signed-asymmetry-features), [P-10](#p-10--always-include-an-idle--unknown-class-to-prevent-false-detections), [P-11](#p-11--reconcile-sensor-scale-across-sources-gravity-at-rest-is-the-probe-but-motion-invalidates-it).

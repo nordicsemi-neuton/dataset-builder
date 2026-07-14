@@ -1,7 +1,7 @@
 ---
 type: architecture
 status: active
-updated: 2026-06-25
+updated: 2026-07-13
 implementation:
   - ../../src/data_builder/window_survival.py
   - ../../src/data_builder/resample.py
@@ -10,6 +10,7 @@ sources:
   - ../../raw/platform-docs/2026-06-25-pipeline-signal-processing-windowing.md
   - ../../raw/platform-docs/2026-06-25-get-started-2-cleaning-combining-preprocessing.md
   - ../../raw/platform-docs/2026-06-25-pipeline-data-preprocessing.md
+  - ../../raw/harvested-practice/2026-07-13-resampling-decision-procedure.md
   - ../../scripts/diagnostics/window_survival_sim.py
   - ../../scripts/preprocessing/center_training_data.py
 tags: [platform, signal-processing, windowing, sliding-shift, sampling-rate, sram, contract]
@@ -39,6 +40,8 @@ Windowing groups N consecutive rows ("samples") into one feature-extraction wind
 ### Sampling-rate rule (critical for our data-builder)
 
 > **Sensors with different frequencies must be down-/up-sampled to a single common frequency *before* upload.** Window size is expressed in samples, so a consistent Hz across the dataset is mandatory. Always record the sampling rate (Hz) per dataset.
+
+**Our method (not a platform rule):** *how* we perform that resampling matters. Measure the real rate from the timestamps first (`1/median(diff(t))` — jitter and nominal≠actual are normal), and **anti-alias before decimation when downsampling** — plain linear interpolation onto a coarser grid aliases and silently corrupts features. Prefer downsampling toward the lowest common rate that clears Nyquist over upsampling (which fabricates resolution). Full decision procedure: [domain P-14](../principles/domain.md#p-14--resampling-is-a-decision-procedure-measure-first-anti-alias-before-downsampling-validate); the scipy-based anti-alias implementation is tracked by [ADR-0003](../decisions/adr-0003-scipy-on-resample-path.md) and spec [databuilder-008](../../specs/databuilder-008-resampling-antialias.md).
 
 ### Frequency-domain features exception
 
@@ -94,4 +97,4 @@ From field experience; treat as working models, verify against the platform's "P
 
 ## Implementation
 
-Window-survival simulation in [`window_survival.py`](../../src/data_builder/window_survival.py) and single-rate resampling in [`resample.py`](../../src/data_builder/resample.py) (gesture centering in `center.py`). Engine: [ADR-0002](../decisions/adr-0002-data-builder-engine-architecture.md). The strict-pure window-survival model remains an **upper bound** — findings are framed to verify against the platform's Processed Data view. The harvested diagnostic/centering scripts in [`scripts/`](../../scripts/README.md) stay as reference tooling.
+Window-survival simulation in [`window_survival.py`](../../src/data_builder/window_survival.py) and single-rate resampling in [`resample.py`](../../src/data_builder/resample.py) (gesture centering in `center.py`). Resampling **anti-aliases downsampling** (`scipy.signal.resample_poly`, `padtype='line'`, per contiguous run; upsample stays `numpy.interp`); a run too short to filter cleanly, or a missing scipy on a downsample, is **refused** (FIX_REQUIRED) rather than shipping aliased data — [ADR-0003](../decisions/adr-0003-scipy-on-resample-path.md), [domain P-14](../principles/domain.md#p-14--resampling-is-a-decision-procedure-measure-first-anti-alias-before-downsampling-validate), databuilder-008. The broader measure-first/auto-select/jitter+gap procedure (rest of P-14) is a deferred follow-up. Engine: [ADR-0002](../decisions/adr-0002-data-builder-engine-architecture.md). The strict-pure window-survival model remains an **upper bound** — findings are framed to verify against the platform's Processed Data view. The harvested diagnostic/centering scripts in [`scripts/`](../../scripts/README.md) stay as reference tooling.

@@ -1,5 +1,7 @@
 # Runtime dependencies for data-builder — pinned for reproducible installs and CI.
-# Only two third-party libraries are used; everything else is the Python standard library.
+# numpy + pandas everywhere; scipy is used only on the resampling path (anti-alias downsampling, ADR-0003).
+# Everything else is the Python standard library.
 # Bump deliberately and re-run the suite (PYTHONPATH=src python3 -m unittest discover -s src/tests).
 numpy==2.4.4
 pandas==3.0.3
+scipy==1.17.1  # <1.18: 1.18 requires Python>=3.12, but we support 3.11 (pyproject requires-python, CI matrix)

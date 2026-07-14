@@ -34,13 +34,25 @@ data** — recordings can silently mix accelerometer ranges/units; probe the at-
 source, bring everything onto the one scale the device emits, or exclude the mismatches
 ([domain P-11](../../../wiki/principles/domain.md)).
 
-**Hard gate — settle the nature of every class before you go near centering** ([domain P-05](../../../wiki/principles/domain.md)):
-**ask the user** which classes are **continuous** motions (idle, "unknown", rotation, walking — a sustained
-stream with no single start/finish → *trimmed, never centered*) and which are **discrete** gestures (tap,
-flick, double-tap — clear start and finish, one motion peak → *centered*). Record the split in
-`continuous_classes` / `gesture_classes`. **Never infer class nature from filenames or the gesture-demo
-example** — a name like "rotate" looks like a gesture but is continuous. Getting this wrong sends a
-continuous class into centering, where it can never sit mid-window.
+**Hard gate — STOP: settle each class's physical nature before centering**
+([domain P-15](../../../wiki/principles/domain.md), [P-05](../../../wiki/principles/domain.md)). This is a
+real checkpoint, not advice: it is on the always-stop list ("How to run the flow" below), and you must not
+run a centering `prep` until it is confirmed. **Only for classification with gesture classes** — skip it
+cleanly for regression, anomaly detection, or a classification set with no discrete gestures.
+
+**Ask the user, then echo back one batched table** — one row per class: *class → what the motion physically
+is, in their words → therefore continuous or discrete*:
+- **continuous** motions (idle, "unknown", rotation, walking — a sustained stream, no single start/finish)
+  → *trimmed, never centered* → `continuous_classes`;
+- **discrete** gestures (tap, flick, double-tap — clear start/finish, one motion peak) → *centered* →
+  `gesture_classes`.
+
+**Never infer a class's nature from its filename, column name, or the gesture-demo preset** — "rotate"
+reads like a gesture but is continuous, and you can't tell which names mislead without the physical
+description, so ask about *every* class. Get the table confirmed/corrected before continuing: a wrong split
+sends a continuous class into centering where it can never sit mid-window (P-05), and the physical meaning
+is also how you spot mirror pairs that later need direction features
+([P-06](../../../wiki/principles/domain.md)).
 
 Start from [the schema](../../../data/skill-presets/dataset-profile.schema.json) /
 [example](../../../data/skill-presets/nordic-gesture-demo.json); write the confirmed profile to
@@ -66,11 +78,17 @@ If a class is short or thin, surface it now and offer [collection-advice](../col
 
 ## Stage 2 — Clean & assemble
 
-With the user's confirmed decisions, combine the kept recordings and repair the format. This is the engine's
-`prep` (it also does the next stages); preview what it will do, then run it.
+With the user's confirmed decisions, combine the kept recordings and repair the format with the engine's
+`prep`. **Do not center yet:** run this pass with `--no-center` (combine/repair/validate only) so you can
+preview the assembly; centering is the single deliberate pass in Stage 3, gated on the Stage 0 class-nature
+confirmation.
 
 ## Stage 3 — Center, then auto-verify (suggest, you confirm)
 
+**Only once the Stage 0 gate is confirmed,** run the single centering pass: re-run `prep` **from the raw
+inputs** with the confirmed profile (drop `--no-center`) to the **same `--out` path**, overwriting the
+Stage 2 preview so the folder holds one file, centered once ([process P-09](../../../wiki/principles/process.md)) —
+don't write the preview and the centered file to different paths.
 `prep` **auto-centers** gesture classes (peak mid-window) and trims continuous ones — default-on
 ([domain P-05](../../../wiki/principles/domain.md)). Then **confirm it worked**: run
 [`check_signal_centered.py`](../../../scripts/diagnostics/check_signal_centered.py) on the output (pass the
@@ -87,7 +105,9 @@ Never tune the window to force a continuous class to center. Hand off to
 ## Stage 4 — Resample (only if needed)
 
 If the quality analysis showed mixed sampling rates, resample to one common rate
-([domain P-04](../../../wiki/principles/domain.md)) — `prep --resample <HZ>`. Otherwise skip.
+([domain P-04](../../../wiki/principles/domain.md)) — `prep --resample <HZ>`. Otherwise skip. Like every
+`prep` this runs **from the raw inputs to the same `--out`** (centering stays on); `--resample` is a flag on
+the one final export run, not a pass over an already-processed file — so carry it into Stage 6.
 
 ## Stage 5 — Recommend the feature enable-set (measured)
 
@@ -117,7 +137,10 @@ not "STD").
 
 ## Stage 6 — Validate & export (the pre-upload gate)
 
-Run the full `prep` (or `validate`) and present the verdict **PASS / FIX-REQUIRED / WILL-LOSE-DATA** in the
+Run the **single final export `prep`** — from the raw inputs to the same `output/<name>/` CSV, carrying the
+flags settled earlier (centering on; `--resample <HZ>` if Stage 4 applied) so the export is centered once
+and resampled, not a re-pass over an earlier output — (or `validate` a finished file) and present the
+verdict **PASS / FIX-REQUIRED / WILL-LOSE-DATA** in the
 [process P-07](../../../wiki/principles/process.md) shape: verdict → their numbers → numbered fixes each
 citing the rule → notes. The engine **refuses to write** a file that would be rejected or silently lose a
 class unless the user explicitly overrides.
@@ -125,7 +148,8 @@ class unless the user explicitly overrides.
 On PASS, deliver **one self-explanatory folder, not loose files** ([process P-09](../../../wiki/principles/process.md)):
 write into `output/<name>/` the upload CSV, the dictionary the engine **auto-writes** next to it
 (`<csv>_dictionary.json` — **do not hand-make a second one**), the `profile.json` recipe, and a
-plain-language `README.md`. The README must name the **single file to upload**, the class map, the
+plain-language `README.md`. The README must name the **single file to upload**, the class map, **each
+class's confirmed physical description and continuous/discrete nature (from the Stage 0 gate)**, the
 desktop-runner flags (`-t <label-col>`), **the recommended platform settings** — training shift = window (no
 overlap), **inference shift at 50–70% overlap** ([domain P-02](../../../wiki/principles/domain.md)), storage
 type, and the **measured feature enable-set from Stage 5** — and one line on what each other file is for.
@@ -146,5 +170,6 @@ this stage *advises*; it does not compute features into the file.
 ## How to run the flow
 - One stage at a time; end each with a short "here's what I found / did — OK to continue, or adjust?".
 - Plain language, no internal jargon; the user should always see the evidence behind a suggestion.
-- If the user says "just run it", proceed end-to-end but still **stop on any real decision** (an outlier
-  source, a class that won't center, a FIX-REQUIRED/WILL-LOSE-DATA verdict).
+- If the user says "just run it", proceed end-to-end but still **stop on any real decision** — the
+  **class-nature gate** (Stage 0: each class's physical meaning + continuous/discrete split), an outlier
+  source, a class that won't center, a FIX-REQUIRED/WILL-LOSE-DATA verdict.

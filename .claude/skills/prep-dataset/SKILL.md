@@ -28,6 +28,16 @@ Treat the user's stated class map / rate / durations as hypotheses to check
 ([process P-02/P-03](../../../wiki/principles/process.md)). If the user has no profile, write one to
 `output/<name>.profile.json` from what they tell you, then confirm it back to them in plain language.
 
+**Class-nature gate before centering** ([domain P-15](../../../wiki/principles/domain.md)). Centering
+(step 2) is default-on and depends on which classes are discrete gestures vs continuous streams, so **do
+not run the centering `prep` until you confirm the split with the user** — in one batched table (*class →
+what the motion physically is → continuous or discrete*), and **never infer nature from filenames or the
+preset** ("rotate" looks discrete but is continuous; ask about every class). Feed the answer back into the
+split: a class the user calls continuous is **moved to `continuous_classes`** so `prep` trims rather than
+centers it (`--no-center` is whole-run, not per-class). Skip cleanly for regression/anomaly or a set with no
+gesture classes. This confirmation is transient here — `prep-dataset` outputs the CSV + dictionary, not a
+README, so the narrative isn't persisted; the split it corrects does persist in the profile.
+
 ## 2. Run the engine
 
 The production engine is `src/data_builder`. From the repo root:
@@ -40,8 +50,8 @@ PYTHONPATH=src python3 -m data_builder.cli prep <recording1.csv> [recording2.csv
 - **Centering is default-on for gesture datasets** (it centers the classes the profile marks as
   `gesture_classes` so each gesture's motion peak sits mid-window, and trims `continuous_classes` like
   idle/unknown) — this is a near-universal, essential step for discrete gestures
-  ([domain P-05](../../../wiki/principles/domain.md)). Pass `--no-center` to skip it (e.g. data already
-  centered, or a non-gesture dataset). It uses the validated centering algorithm (auto work-axis,
+  ([domain P-05](../../../wiki/principles/domain.md)). **Run it only after the class-nature gate above is
+  confirmed.** Pass `--no-center` to skip it (e.g. data already centered, or a non-gesture dataset). It uses the validated centering algorithm (auto work-axis,
   peak-tolerance QC); confirm the result on real data with
   [`check_signal_centered.py`](../../../scripts/diagnostics/check_signal_centered.py).
 - Add `--resample <HZ> [--time-unit s|ms|us]` if sessions have different sampling rates

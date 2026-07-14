@@ -4,7 +4,7 @@ The production engine the user-facing skills (prep-dataset, validate-upload) cal
 the contract it satisfies lives in wiki/architecture/platform-* and wiki/architecture/
 data-skill-preset-contract.md; this code is the source of truth on disk.
 
-numpy + pandas only (no scipy, no pytest).
+numpy + pandas (+ scipy on the resampling path only, for anti-alias downsampling — ADR-0003); no pytest.
 """
 
 from .findings import Finding, Report, Severity, Group, reduce_verdict

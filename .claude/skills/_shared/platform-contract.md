@@ -84,7 +84,8 @@ Sources: [preprocessing options](../../../wiki/architecture/platform-preprocessi
   features **LR_SLOPE / LR_INTERCEPT** enabled, or they conflate/die. [domain P-06] —
   [feature extraction](../../../wiki/architecture/platform-feature-extraction.md).
 - 🧪 **Discrete gestures should be centered** (peak mid-window), per class, never across class
-  boundaries; idle/unknown stay raw. [domain P-05]
+  boundaries; idle/unknown stay raw. [domain P-05] **Confirm each class's physical nature (continuous vs
+  discrete) with the user before centering — never infer it from filenames/presets.** [domain P-15]
 
 ## Group D — DEPLOYMENT / runner CSV (so local validation matches) 🔒
 

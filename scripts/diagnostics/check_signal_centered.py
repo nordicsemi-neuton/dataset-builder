@@ -6,6 +6,15 @@ middle), and which classes are centered vs. raw.
 
 Usage:
     python3 check_signal_centered.py <csv_path> [--window 100]
+    python3 check_signal_centered.py <csv_path> --sensor-cols emg_1 emg_2 emg_3 [--window 100]
+
+By default the sensor columns are the six IMU names below. Pass --sensor-cols to name the columns
+explicitly — required for any non-IMU signal (EMG, magnetometer, vibration) or IMU data whose columns
+are not named acc_*/gyro_*. The named columns must be numeric and finite (the platform requires it);
+a text, boolean, or non-finite column is rejected with a clear message rather than a crash or a
+silently degenerate verdict. NOTE: the centering heuristic and its thresholds were tuned on IMU
+gesture data; whether "centering" is even the right question for another modality is a separate
+judgement (see wiki/discovery/platform-task-types.md).
 
 For each class, walk through non-overlapping windows of size WINDOW, find the
 argmax of |signal - window-mean| on the most active axis per window, and report
@@ -74,6 +83,9 @@ def main():
     ap.add_argument("csv")
     ap.add_argument("--window", type=int, default=100)
     ap.add_argument("--label-col", default="class")
+    ap.add_argument("--sensor-cols", nargs="+", default=None,
+                    help="sensor column names to analyse (default: the six IMU names). "
+                         "Required for non-IMU or non-canonically-named data.")
     args = ap.parse_args()
 
     path = Path(args.csv)
@@ -81,9 +93,32 @@ def main():
     df = pd.read_csv(path, sep=sep)
     if args.label_col not in df.columns:
         raise SystemExit(f"Column '{args.label_col}' not found in {path}")
-    cols = [c for c in SENSOR_COLS if c in df.columns]
-    if not cols:
-        raise SystemExit(f"No sensor columns found; expected any of {SENSOR_COLS}")
+    if args.sensor_cols:
+        # De-duplicate while preserving the order given; a dropped/added column would change the
+        # per-window most-active-axis choice and thus the verdict.
+        cols = list(dict.fromkeys(args.sensor_cols))
+        missing = [c for c in cols if c not in df.columns]
+        if missing:
+            raise SystemExit(f"--sensor-cols not found in {path}: {missing}")
+        # These columns are fed straight into the numeric peak-finding path. Validate here so a text
+        # column errors clearly instead of crashing deep in numpy, and — more importantly — so a
+        # boolean or non-finite column cannot produce a silently degenerate verdict. The platform
+        # requires every sensor value numeric and finite, so refusing such a file is also correct.
+        bad_type = [c for c in cols
+                    if pd.api.types.is_bool_dtype(df[c]) or not pd.api.types.is_numeric_dtype(df[c])]
+        if bad_type:
+            raise SystemExit(f"--sensor-cols must be numeric (not text/boolean): {bad_type}")
+        nonfinite = [c for c in cols if not np.isfinite(df[c].to_numpy(dtype=np.float64)).all()]
+        if nonfinite:
+            raise SystemExit(
+                f"--sensor-cols contain missing / non-finite values: {nonfinite}. The platform "
+                f"requires every value numeric and finite; clean these rows first "
+                f"(the centering verdict would otherwise be computed from corrupted windows).")
+    else:
+        cols = [c for c in SENSOR_COLS if c in df.columns]
+        if not cols:
+            raise SystemExit(f"No sensor columns found; expected any of {SENSOR_COLS} "
+                             f"— or name them explicitly with --sensor-cols")
 
     print(f"Loaded {path} ({sep!r}-sep)  rows={len(df):,}")
     print(f"Window size: {args.window}")

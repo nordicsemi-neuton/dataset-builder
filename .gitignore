@@ -15,3 +15,7 @@ output/*
 !output/.gitkeep
 input/*
 !input/.gitkeep
+
+# maintainer-only Claude hook (release reminder) — never committed, never shipped
+.claude/settings.local.json
+.claude/release-reminder.txt

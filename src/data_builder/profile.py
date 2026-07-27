@@ -45,6 +45,7 @@ class DatasetProfile:
     target_technology: str = "neuton"
     class_encoding: dict[str, Any] | None = None
     window: dict[str, Any] | None = None
+    signal_processing: bool | None = None   # None = the profile does not say; see SP applicability page
     holdout_path: str | None = None
     notes: str = ""
 
@@ -146,6 +147,7 @@ class DatasetProfile:
             target_technology=tech,
             class_encoding=raw.get("class_encoding"),
             window=raw.get("window"),
+            signal_processing=raw.get("signal_processing"),
             holdout_path=raw.get("holdout_path"),
             notes=str(raw.get("notes", "")),
         )
@@ -167,6 +169,13 @@ class DatasetProfile:
 
         if self.sampling_rate_hz is not None and not (self.sampling_rate_hz > 0):
             raise ProfileError("sampling_rate_hz must be > 0 when set")
+
+        # Signal-Processing mode: a real bool or absent. Reject 1/0/"true" that bool() would coerce
+        # (isinstance(True, bool) is True; isinstance(1, bool) is False), so the field is tri-state:
+        # True (windowed), False (tabular), None (unstated).
+        if self.signal_processing is not None and not isinstance(self.signal_processing, bool):
+            raise ProfileError(
+                f"signal_processing must be true, false, or absent, got {self.signal_processing!r}")
 
         # Class encoding: contiguous-from-0; gesture/continuous are subsets of the map's indices.
         if self.class_encoding is not None:

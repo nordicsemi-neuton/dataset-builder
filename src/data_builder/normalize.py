@@ -14,6 +14,11 @@ import pandas as pd
 from .findings import Finding, Group, Severity
 
 DATASET_REQ = "wiki/architecture/platform-dataset-requirements.md"
+SIGNAL_PROC = "wiki/architecture/platform-signal-processing.md"
+
+# A backward timestamp step is a real reorder only when it exceeds this * the normal forward step;
+# smaller backward steps are sub-step clock jitter, not a shuffle (databuilder-019).
+ORDER_STEP_TOL = 1.0
 
 NA_TOKENS = {"", "NA", "NAN", "N/A", "NULL", "NONE", "#N/A", "#NA", "NIL"}
 _NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
@@ -118,6 +123,52 @@ def check_timestamps(series: pd.Series, col_name: str = "time"):
             f"timestamps before uploading (e.g. 10/18/2017 -> 1508284800). The tool will not guess the "
             f"format/timezone for you.",
             f"{DATASET_REQ}#value-rules", {"column": col_name, "examples": bad}))
+    return findings
+
+
+def check_time_order(df: pd.DataFrame, time_col: str | None, session_col: str | None = None,
+                     source: str | None = None):
+    """Flag rows whose timestamp goes backwards WITHIN one recording — a shuffled / mis-sorted row
+    order the platform's row-order windowing cannot recover (databuilder-019).
+
+    Called PER RECORDING: validate checks the one uploaded file (per session where a session column
+    exists); prep checks each input file inside combine (passing source=the file name), so a legitimate
+    concatenation seam (a new recording restarting its clock) is never seen and never flagged -- the
+    exemption is exact, not heuristic. A backward step counts only when it exceeds the normal forward
+    step (ORDER_STEP_TOL), so sub-step clock jitter is not a 'shuffle'; a run with no forward progress
+    (reverse-sorted) is flagged wholesale. Non-numeric / calendar timestamps are check_timestamps'
+    province and are ignored here (coerced to NaN, dropped)."""
+    findings: list[Finding] = []
+    if not (time_col and time_col in df.columns):
+        return findings
+    groups = df.groupby(session_col, sort=False) if (session_col and session_col in df.columns) \
+        else [(None, df)]
+    for sid, sub in groups:
+        t = pd.to_numeric(sub[time_col], errors="coerce").to_numpy(dtype=np.float64)
+        t = t[~np.isnan(t)]
+        if len(t) < 2:
+            continue
+        d = np.diff(t)
+        pos = d[d > 0]
+        if len(pos) == 0:
+            n_bad = int((d < 0).sum())                                   # no forward progress -> reverse
+        else:
+            n_bad = int((d < -ORDER_STEP_TOL * float(np.median(pos))).sum())
+        if not n_bad:
+            continue
+        where = (f"Session {sid}" if sid is not None
+                 else (f"Recording '{source}'" if source else "The recording"))
+        data: dict = {"session": None if sid is None else str(sid), "out_of_order_rows": n_bad}
+        if source:
+            data["source"] = source
+        findings.append(Finding(
+            Group.BAD_MODEL, Severity.FIX_REQUIRED, "timestamps_out_of_order",
+            f"{where} has {n_bad} place(s) where the timestamp jumps backwards mid-recording (rows out "
+            f"of time order). The platform windows in row order, so out-of-order rows build "
+            f"temporally-incoherent windows. Sort this recording by time (or confirm the rows are "
+            f"already in acquisition order); if it is really several recordings, give each its own "
+            f"session (a session column) so the platform does not window across the boundary.",
+            f"{SIGNAL_PROC}#why-this-matters-to-the-data-builder", data))
     return findings
 
 

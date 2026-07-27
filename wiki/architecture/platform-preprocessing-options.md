@@ -1,9 +1,10 @@
 ---
 type: architecture
 status: active
-updated: 2026-07-10
+updated: 2026-07-27
 implementation:
   - ../../src/data_builder/datatype.py
+  - ../../src/data_builder/resample.py
   - ../../raw/platform-docs/2026-06-25-pipeline-data-preprocessing.md
 sources:
   - ../../raw/platform-docs/2026-06-25-pipeline-data-preprocessing.md
@@ -60,3 +61,5 @@ Pick a **single** numeric type for **all** features: **INT8, INT16, or FLOAT32**
 ## Implementation
 
 Data-type recommendation in [`datatype.py`](../../src/data_builder/datatype.py) — **Axon ⇒ FLOAT32**, else INT8/INT16/FLOAT32 from observed value ranges; class-balance and metric advice are surfaced by [`validate.py`](../../src/data_builder/validate.py). Engine: [ADR-0002](../decisions/adr-0002-data-builder-engine-architecture.md). Raw docs remain in `sources:` for re-verification.
+
+**Integer preservation on the resample path** ([ADR-0004](../decisions/adr-0004-resample-integer-preservation.md), B4): resampling interpolates, which turns whole-number sensor counts (raw INT16 is the platform's preferred storage) into fractional values and would push `recommend_dtype` to FLOAT32 for no real gain. So on the resample path only, [`resample_to_rate`](../../src/data_builder/resample.py) rounds back any column whose **every source value was integral** (it stays `float64`, is never cast — [ADR-0002](../decisions/adr-0002-data-builder-engine-architecture.md)'s "never cast to int" is narrowed to "never cast so as to change the represented value"), emits a `resample_integer_preserved` INFO **only when the resample actually ran** ([process P-29](../principles/process.md)), and `recommend_dtype` then recovers INT8/INT16. The fix is at the source; the shared writer is unmodified and the non-resampled path is byte-identical ([process P-30](../principles/process.md)).

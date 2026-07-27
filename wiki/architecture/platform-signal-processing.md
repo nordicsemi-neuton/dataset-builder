@@ -1,10 +1,13 @@
 ---
 type: architecture
 status: active
-updated: 2026-07-13
+updated: 2026-07-25
 implementation:
   - ../../src/data_builder/window_survival.py
   - ../../src/data_builder/resample.py
+  - ../../src/data_builder/validate.py
+  - ../../src/data_builder/normalize.py
+  - ../../src/data_builder/combine.py
   - ../../raw/platform-docs/2026-06-25-pipeline-signal-processing-windowing.md
 sources:
   - ../../raw/platform-docs/2026-06-25-pipeline-signal-processing-windowing.md
@@ -13,12 +16,15 @@ sources:
   - ../../raw/harvested-practice/2026-07-13-resampling-decision-procedure.md
   - ../../scripts/diagnostics/window_survival_sim.py
   - ../../scripts/preprocessing/center_training_data.py
+  - ../../raw/harvested-practice/2026-07-23-framing-and-evaluation-lessons.md
 tags: [platform, signal-processing, windowing, sliding-shift, sampling-rate, sram, contract]
 ---
 
 # platform — Signal Processing: windowing & sampling contract
 
 Signal Processing (SP) is the platform stage that turns a raw, time-ordered sensor CSV into per-window feature vectors (see [feature extraction](platform-feature-extraction.md)). The **windowing parameters constrain the input data** the data-builder must deliver — especially sampling rate and minimum length. Enable it by selecting **Signal Processing (SP)**; a **Guided Setup** wizard can auto-configure it, or use **Manual Setup**.
+
+**SP is optional and off by default** — everything on this page applies only once it is switched on. Whether it *should* be on for a given dataset is a separate, upstream decision: [signal-processing applicability](platform-signal-processing-applicability.md).
 
 Upstream contract: [dataset requirements](platform-dataset-requirements.md). Downstream: [feature extraction](platform-feature-extraction.md).
 
@@ -68,6 +74,17 @@ Splits each window into smaller sub-segments to capture local peaks/dips (useful
 - **Disabled by default.** When enabled, raw values from all variables/axes are used directly as model inputs (alongside extracted features).
 - **Not available for Axon (LiteRT) technology.**
 - Cannot be used when: sliding shift ≠ window size; any frequency-domain feature is enabled; or window auto-determination is enabled.
+
+> **Commonly misread as — do not restate it this way.** This constraint is about **the lag-feature
+> option only**: those three conditions are when *lag features* become unavailable. It is **not** a
+> rule that enabling frequency-domain features forces the sliding shift to equal the window size. No
+> such rule exists in the documentation.
+>
+> The misreading is easy to make and expensive: acting on it means advising **zero-overlap inference**,
+> contradicting the 50–70% inference-overlap guidance in [domain P-02](../principles/domain.md), on
+> exactly the long windows where overlap matters most. The FFT constraints that *do* exist are the
+> window range (128–2048, power of two) and the sub-windowing incompatibility above — nothing about the
+> shift. See [harvested practice](../../raw/harvested-practice/2026-07-23-framing-and-evaluation-lessons.md).
 
 ## Normalization defaults under SP
 

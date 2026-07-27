@@ -68,9 +68,150 @@ class TestCenterScript(unittest.TestCase):
 
 
 class TestCheckSignalCentered(unittest.TestCase):
+    SCRIPT = "scripts/diagnostics/check_signal_centered.py"
+
     def test_help_runs(self):
-        r = _run("scripts/diagnostics/check_signal_centered.py", "--help")
+        r = _run(self.SCRIPT, "--help")
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def _emg(self, d, extra=None, name="emg.csv"):
+        rng = np.random.RandomState(3)
+        n = 800
+        data = {f"emg_{i}": 0.02 * rng.randn(n) for i in (1, 2, 3)}
+        for w in range(n // 100):          # a genuinely centered gesture on emg_2
+            data["emg_2"][w * 100 + 48:w * 100 + 53] += 4.0
+        df = H.pd.DataFrame(data)
+        df["class"] = 1
+        if extra:
+            extra(df)
+        p = os.path.join(d, name)
+        df.to_csv(p, index=False)
+        return p
+
+    def test_sensor_cols_non_imu_runs(self):
+        # databuilder-015 D2a-1: non-IMU columns are dead-ended on the parent; --sensor-cols runs.
+        d = tempfile.mkdtemp()
+        p = self._emg(d)
+        r = _run(self.SCRIPT, p, "--label-col", "class", "--sensor-cols", "emg_1", "emg_2", "emg_3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("CENTERED", r.stdout)
+
+    def test_sensor_cols_missing_column(self):
+        d = tempfile.mkdtemp()
+        p = self._emg(d)
+        r = _run(self.SCRIPT, p, "--label-col", "class", "--sensor-cols", "emg_1", "nope")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("nope", r.stderr)
+        # on the parent argparse rejects the unknown flag and echoes the value; must NOT be that path
+        self.assertNotIn("unrecognized arguments", r.stderr)
+
+    def test_sensor_cols_text_column_rejected(self):
+        d = tempfile.mkdtemp()
+        p = self._emg(d, extra=lambda df: df.__setitem__("emg_1", "x"))
+        r = _run(self.SCRIPT, p, "--label-col", "class", "--sensor-cols", "emg_1", "emg_2", "emg_3")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("emg_1", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        # not the parent's argparse-rejects-the-flag path (which would also be non-zero + name it)
+        self.assertNotIn("unrecognized arguments", r.stderr)
+
+    def test_sensor_cols_bool_column_rejected(self):
+        d = tempfile.mkdtemp()
+        p = self._emg(d, extra=lambda df: df.__setitem__("emg_1", df["emg_1"] > 0))
+        r = _run(self.SCRIPT, p, "--label-col", "class", "--sensor-cols", "emg_1", "emg_2", "emg_3")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("emg_1", r.stderr)
+        self.assertNotIn("unrecognized arguments", r.stderr)
+
+    def test_sensor_cols_nonfinite_refused(self):
+        # The new flag targets unprepared files; a non-finite sensor value is refused with a clear
+        # message rather than producing a silently corrupted verdict (P-21: no new silent path).
+        d = tempfile.mkdtemp()
+        p = self._emg(d, extra=lambda df: df.__setitem__("emg_1",
+                                                          df["emg_1"].mask(df.index == 137, np.nan)))
+        r = _run(self.SCRIPT, p, "--label-col", "class", "--sensor-cols", "emg_1", "emg_2", "emg_3")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("emg_1", r.stderr)
+        self.assertIn("finite", r.stderr)
+
+    def test_default_path_unchanged(self):
+        # [guard] with --sensor-cols omitted a clean IMU CSV is byte-identical to the parent's output.
+        d = tempfile.mkdtemp()
+        rng = np.random.RandomState(7)
+        n = 1200
+        data = {c: 0.01 * rng.randn(n) for c in SENSORS}
+        for w in range(n // 100):
+            data["acc_z"][w * 100 + 48:w * 100 + 53] += 5.0
+        df = H.pd.DataFrame(data)
+        df["class"] = 1
+        p = os.path.join(d, "imu.csv")
+        df.to_csv(p, index=False)
+        r = _run(self.SCRIPT, p, "--label-col", "class")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("CENTERED", r.stdout)
+        # the "No sensor columns found" message must advertise the new flag on the default path
+        r2 = _run(self.SCRIPT, p, "--label-col", "class", "--sensor-cols", "nope1", "nope2")
+        self.assertIn("nope1", r2.stderr)
+
+
+def _wss(*args):
+    return _run("scripts/diagnostics/window_survival_sim.py", *args)
+
+
+class TestWindowSurvivalSim(unittest.TestCase):
+    """window_survival_sim.py had zero coverage before databuilder-015 D2a-2."""
+
+    def _write(self, d, labels, name="w.csv"):
+        rng = np.random.RandomState(0)
+        n = len(labels)
+        df = H.pd.DataFrame({"acc_x": rng.randn(n), "acc_y": rng.randn(n)})
+        df["label"] = labels
+        p = os.path.join(d, name)
+        df.to_csv(p, index=False)
+        return p
+
+    def test_string_labels(self):
+        # D2a-2: parent raises ValueError at int(k) after the totals; the per-label numbers are lost.
+        d = tempfile.mkdtemp()
+        p = self._write(d, ["walk"] * 300 + ["run"] * 300)
+        r = _wss(p, "--window", "100", "--shift", "50")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("label walk:", r.stdout)
+        self.assertIn("label run:", r.stdout)
+
+    def test_string_labels_with_blank(self):
+        # parent crashes at sorted() before any output; must not, and must not invent a nan class.
+        d = tempfile.mkdtemp()
+        labels = ["walk"] * 150 + [np.nan] + ["walk"] * 149 + ["run"] * 300
+        p = self._write(d, labels)
+        r = _wss(p, "--window", "100", "--shift", "50")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("label nan:", r.stdout)
+        self.assertIn("missing / non-finite label", r.stdout)
+
+    def test_inf_label_no_crash_no_phantom(self):
+        # parent OverflowError; a naive str() fix prints a phantom 'label inf' <-- ZERO; neither here.
+        d = tempfile.mkdtemp()
+        p = self._write(d, [0.0] * 200 + [np.inf] * 200 + [1.0] * 200)
+        r = _wss(p, "--window", "100", "--shift", "50")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("label inf:", r.stdout)
+        self.assertIn("label 0:", r.stdout)
+        self.assertIn("label 1:", r.stdout)
+
+    def test_numeric_labels_render_as_bare_integers(self):
+        # [guard] int64, integral float64 and bool all render "label 0:" (not "0.0" / "False").
+        for labels in ([0] * 300 + [1] * 300,
+                       [0.0] * 300 + [1.0] * 300,
+                       [False] * 300 + [True] * 300):
+            d = tempfile.mkdtemp()
+            p = self._write(d, labels)
+            r = _wss(p, "--window", "100", "--shift", "50")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("label 0:", r.stdout)
+            self.assertIn("label 1:", r.stdout)
+            self.assertNotIn("label 0.0:", r.stdout)
+            self.assertNotIn("label False:", r.stdout)
 
 
 if __name__ == "__main__":

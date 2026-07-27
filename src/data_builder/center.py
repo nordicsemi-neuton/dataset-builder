@@ -22,6 +22,7 @@ PRESET = "wiki/architecture/data-skill-preset-contract.md"
 WORK_WINDOW_RATIO = 0.95   # internal detection window as a fraction of the platform window
 THRESHOLD_COEF = 0.5       # segmentation threshold = THRESHOLD_COEF * mean(envelope)
 PEAK_TOLERANCE = 10        # drop a window whose peak is farther than this from the middle
+MAX_CLASSES_IN_MESSAGE = 8  # per-class clauses shown in the row-delta message; full ledger stays in data
 
 
 def _envelope(axis: np.ndarray, work_window: int) -> np.ndarray:
@@ -61,7 +62,14 @@ def _dedup_centers(scored, min_distance: int):
 
 
 def _center_one_axis(sub: pd.DataFrame, work_axis: str, window: int):
-    """Center one class using one axis to detect peaks. Returns (centered_df_or_None, kept_count)."""
+    """Center one class using one axis to detect peaks.
+
+    Returns (centered_df_or_None, windows_kept, events_detected), where events_detected is the number
+    of gesture events this axis resolved (above-threshold envelope runs, after the ≤1-sample filter
+    and NMS de-duplication) and windows_kept is how many of those became clean windows. The two differ
+    only when an event was dropped for landing off-centre or within half a window of an edge; at small
+    windows no drop is reachable, so they coincide there (databuilder-014, domain P-18).
+    """
     work_window = max(1, int(window * WORK_WINDOW_RATIO))
     axis = pd.to_numeric(sub[work_axis], errors="coerce").to_numpy(dtype=np.float64)
     axis = axis - np.nanmean(axis)
@@ -78,34 +86,40 @@ def _center_one_axis(sub: pd.DataFrame, work_axis: str, window: int):
         local_peak = int(s + np.argmax(abs_peak[s:e]))
         candidates.append((local_peak, float(abs_peak[local_peak])))
 
+    centers = _dedup_centers(candidates, min_distance=window)
+    events_detected = len(centers)
+
     half = window // 2
-    windows, dropped = [], 0
-    for c in _dedup_centers(candidates, min_distance=window):
+    windows = []
+    for c in centers:
         left, right = c - half, c - half + window
         if left < 0 or right > len(sub):
-            dropped += 1
             continue
         if PEAK_TOLERANCE >= 0:                          # QC: the peak must sit near the middle
             wpeak = int(np.argmax(abs_peak[left:right]))
             if abs(wpeak - half) > PEAK_TOLERANCE:
-                dropped += 1
                 continue
         windows.append(sub.iloc[left:right])             # row slice -> floats preserved
     if not windows:
-        return None, 0
-    return pd.concat(windows, ignore_index=True), len(windows)
+        return None, 0, events_detected
+    return pd.concat(windows, ignore_index=True), len(windows), events_detected
 
 
 def _center_gesture(sub: pd.DataFrame, sensor_cols, window: int):
-    """Auto-work-axis: try every sensor axis, keep the one yielding the most kept windows."""
-    best, best_kept = None, -1
+    """Auto-work-axis: keep the axis yielding the most windows; report ITS detected/kept counts.
+
+    Returns (centered_df_or_None, windows_kept, events_detected). The counts come from the winning
+    axis only -- the one whose windows are actually returned -- so events_detected >= windows_kept
+    holds and both describe the same data the caller receives (databuilder-014).
+    """
+    best, best_kept, best_detected = None, -1, 0
     for ax in sensor_cols:
         if ax not in sub.columns:
             continue
-        out, kept = _center_one_axis(sub, ax, window)
+        out, kept, detected = _center_one_axis(sub, ax, window)
         if kept > best_kept:
-            best, best_kept = out, kept
-    return best
+            best, best_kept, best_detected = out, kept, detected
+    return best, max(0, best_kept), max(0, best_detected)
 
 
 def center_per_class(df: pd.DataFrame, profile: DatasetProfile, window: int):
@@ -114,7 +128,15 @@ def center_per_class(df: pd.DataFrame, profile: DatasetProfile, window: int):
     Centering re-orders rows and extracts non-contiguous windows, so any time/session column would be
     scrambled (non-monotonic). Like the validated reference tool, the output keeps ONLY sensor axes +
     the label; time/session columns are dropped (the platform windows fixed-rate rows by position).
+
+    Requires a positive int window. Centering is a windowing operation; there is no meaningful centering
+    without a window, so a None/<1 window is a contract violation, raised loudly rather than crashing
+    cryptically deep in the arithmetic. pipeline.prep never reaches here with a bad window (it skips
+    centering under SP off, and SP-on always resolves window >= 1) -- this guards the module for any
+    other caller (databuilder-016, P-21).
     """
+    if not isinstance(window, int) or isinstance(window, bool) or window < 1:
+        raise ValueError(f"center_per_class requires a positive int window, got {window!r}")
     findings: list[Finding] = []
     label_col = profile.label_column
     gesture = set(profile.gesture_classes)
@@ -130,10 +152,12 @@ def center_per_class(df: pd.DataFrame, profile: DatasetProfile, window: int):
             f"{SIGNAL_PROC}#why-this-matters-to-the-data-builder", {"dropped": dropped}))
     df = df[keep_cols + dropped]  # keep all for the per-class slicing below; project at the end
     parts = []
+    ledger = []  # one entry per class: rows in, rows out, events -- announce the discard, then quantify it (P-18)
 
     for cls in sorted(df[label_col].unique()):
         sub = df[df[label_col] == cls].reset_index(drop=True)
         c = int(cls)
+        rows_in = len(sub)
         if c in continuous:
             keep = (len(sub) // window) * window
             if keep == 0:
@@ -144,9 +168,11 @@ def center_per_class(df: pd.DataFrame, profile: DatasetProfile, window: int):
                     f"{SIGNAL_PROC}#why-this-matters-to-the-data-builder", {"label": c, "rows": len(sub)}))
             else:
                 parts.append(sub.iloc[:keep])
+            ledger.append({"label": c, "kind": "continuous", "rows_in": rows_in,
+                           "rows_out": keep, "events_detected": None})
         elif c in gesture:
-            windows = _center_gesture(sub, profile.sensor_columns, window)
-            if windows is None or len(windows) == 0:
+            windows, kept, detected = _center_gesture(sub, profile.sensor_columns, window)
+            if windows is None or kept == 0:
                 findings.append(Finding(
                     Group.SILENT_LOSS, Severity.WILL_LOSE_DATA, "no_centered_windows",
                     f"Gesture class {c} produced no centered windows (too short, weak peaks, or peaks not "
@@ -154,8 +180,12 @@ def center_per_class(df: pd.DataFrame, profile: DatasetProfile, window: int):
                     f"different window or recollect sharper gestures.",
                     f"{SIGNAL_PROC}#observed-in-practice-field-scenarios--not-documented-platform-rules",
                     {"label": c, "rows": len(sub)}))
+                rows_out = 0
             else:
                 parts.append(windows)
+                rows_out = len(windows)
+            ledger.append({"label": c, "kind": "gesture", "rows_in": rows_in,
+                           "rows_out": rows_out, "events_detected": detected})
         else:
             findings.append(Finding(
                 Group.BAD_MODEL, Severity.FIX_REQUIRED, "class_not_partitioned",
@@ -163,7 +193,73 @@ def center_per_class(df: pd.DataFrame, profile: DatasetProfile, window: int):
                 f"tool does not know whether to center or trim it; it was left untouched. Add it to one list.",
                 f"{PRESET}#invariants-the-load-bearing-contract", {"label": c}))
             parts.append(sub)
+            ledger.append({"label": c, "kind": "unpartitioned", "rows_in": rows_in,
+                           "rows_out": rows_in, "events_detected": None})
+
+    findings += _row_delta_findings(ledger, window)
 
     if not parts:
         return df[keep_cols].iloc[0:0].copy(), findings
     return pd.concat(parts, ignore_index=True)[keep_cols], findings
+
+
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _class_clause(e: dict) -> str:
+    pct = e["discarded_percent"]
+    head = f"class {e['label']}: {e['rows_in']} -> {e['rows_out']} rows ({pct}% discarded; "
+    if e["kind"] == "gesture":
+        return head + _plural(e["events_detected"], "gesture event") + " found)"
+    if e["kind"] == "continuous":
+        tail = "continuous, trimmed to whole windows" if e["rows_out"] else \
+            "continuous, too short to fill one window"
+        return head + tail + ")"
+    return head + "left untouched)"
+
+
+def _row_delta_findings(ledger, window: int):
+    """One INFO stating rows in, rows out and gesture events per class (domain P-18).
+
+    Verdict-neutral by design: centering legitimately discards most of a sparse gesture recording, so a
+    row-discard fraction is not a fault signal. Total loss is already WILL_LOSE_DATA; a thin or
+    imbalanced result is caught by validate on the centered frame; event yield is B8's concern. This
+    finding only makes the discard visible and quantified, which is what P-18 asks for (databuilder-014).
+    """
+    for e in ledger:
+        e["discarded_percent"] = round(100.0 * (e["rows_in"] - e["rows_out"]) / e["rows_in"], 1) \
+            if e["rows_in"] else 0.0
+    if not ledger:
+        return []
+    rows_in = sum(e["rows_in"] for e in ledger)
+    rows_out = sum(e["rows_out"] for e in ledger)
+    if rows_in == 0:
+        return []
+    pct = round(100.0 * (rows_in - rows_out) / rows_in, 1)
+
+    shown = sorted(ledger, key=lambda e: (-e["discarded_percent"], e["label"]))[:MAX_CLASSES_IN_MESSAGE]
+    detail = "; ".join(_class_clause(e) for e in shown)
+    hidden = len(ledger) - len(shown)
+    if hidden:
+        noun = "class" if hidden == 1 else "classes"
+        detail += f"; and {hidden} more {noun} — see this finding's data"
+
+    if rows_out == 0:
+        lead = (f"Centering produced no rows at all: {rows_in} rows entering centering, 0 rows out at "
+                f"window {window}. The findings above say which classes were lost and why.")
+    elif any(e["kind"] == "gesture" for e in ledger):
+        lead = (f"Centering keeps one window per detected gesture and discards what lies between events, "
+                f"so the row count drops by design: {rows_in} rows entering centering, {rows_out} rows "
+                f"out ({pct}% discarded) at window {window}.")
+    else:
+        # No gesture class in the frame: each class was trimmed to a whole window multiple or left
+        # untouched (the per-class detail says which). Keep the lead neutral so it is true either way.
+        lead = (f"Centering kept {rows_out} of {rows_in} rows ({pct}% discarded) at window {window}.")
+
+    return [Finding(
+        Group.INFO, Severity.INFO, "centering_rows_discarded",
+        f"{lead} Per class — {detail}.",
+        f"{SIGNAL_PROC}#why-this-matters-to-the-data-builder",
+        {"rows_in": rows_in, "rows_out": rows_out, "discarded_percent": pct, "window": window,
+         "per_class": ledger})]

@@ -14,14 +14,15 @@ import pandas as pd
 
 from . import csv_io, datatype
 from .findings import Finding, Group, Severity, make_report, Report
-from .normalize import try_parse_number, check_timestamps, find_index_column
+from .normalize import try_parse_number, check_timestamps, check_time_order, find_index_column
 from .profile import DatasetProfile, NAME_RE
-from .window_survival import min_run_ok, short_session_findings
+from .window_survival import min_run_ok, short_session_findings, window_yield_findings
 
 DATASET_REQ = "wiki/architecture/platform-dataset-requirements.md"
 SIGNAL_PROC = "wiki/architecture/platform-signal-processing.md"
 PREPROC = "wiki/architecture/platform-preprocessing-options.md"
 FEATURES = "wiki/architecture/platform-feature-extraction.md"
+SP_APPLICABILITY = "wiki/architecture/platform-signal-processing-applicability.md"
 
 MIN_SAMPLES_PER_CLASS = 20
 MIN_CLASSES = 2
@@ -119,9 +120,29 @@ def _value_findings(df, cols, allow_comma_decimal):
     return findings
 
 
-def check_dataframe(df: pd.DataFrame, profile: DatasetProfile, window: int, freq_domain: bool = False,
-                    file_name: str | None = None, holdout_df: pd.DataFrame | None = None):
+def check_dataframe(df: pd.DataFrame, profile: DatasetProfile, window: int | None,
+                    freq_domain: bool = False, file_name: str | None = None,
+                    holdout_df: pd.DataFrame | None = None, sp_on: bool | None = None):
     findings = []
+    # Signal-Processing gate. sp_on is the mode the CLI resolved; None is the legacy contract for
+    # every existing caller (pipeline.prep, tests, run_checks default) -> SP on, no mode findings, so
+    # their behaviour is byte-identical. Only cmd_validate passes it explicitly.
+    #   _sp  -> Signal Processing is on (windowed): run the SP-only checks.
+    #   _win -> those checks that also need a concrete window (SP off never produces one).
+    _sp = sp_on is not False
+    _win = _sp and window is not None
+
+    # Target column present at all. Anomaly detection is exempt: the platform's anomaly data is
+    # unlabeled normal-only sensor data, so a missing target column is the documented shape there
+    # (discovery/platform-task-types.md). For every other task type its absence means the file cannot
+    # be trained on -- and this path passed silently before databuilder-010.
+    if profile.task_type != "anomaly_detection" and profile.label_column not in df.columns:
+        findings.append(Finding(
+            Group.HARD_REJECT, Severity.HARD_REJECT, "label_column_missing",
+            f"The target column '{profile.label_column}' named in the profile is not in the data. "
+            f"Every task type except anomaly detection needs it; check the profile against the file.",
+            f"{DATASET_REQ}#inertial-sensor-signal-processing-row-layout",
+            {"label_column": profile.label_column, "columns": [str(c) for c in df.columns]}))
 
     # Column names.
     for c in df.columns:
@@ -191,47 +212,73 @@ def check_dataframe(df: pd.DataFrame, profile: DatasetProfile, window: int, freq
                     "regardless of the selected metric, so switching metrics is not itself a training fix.",
                     f"{PREPROC}#task-type--evaluation-metric", {"counts": counts}))
 
-    # Window range (conditional on frequency-domain).
-    if freq_domain:
-        if not (_is_pow2(window) and 128 <= window <= 2048):
-            findings.append(Finding(
-                Group.HARD_REJECT, Severity.HARD_REJECT, "window_out_of_range_fft",
-                f"Frequency-domain features require the window to be a power of 2 in [128,2048]; {window} is not.",
-                f"{SIGNAL_PROC}#frequency-domain-features-exception", {"window": window}))
-    else:
-        if not (10 <= window <= 1000):
-            findings.append(Finding(
-                Group.HARD_REJECT, Severity.HARD_REJECT, "window_out_of_range",
-                f"Window must be between 10 and 1000 samples; {window} is out of range.",
-                f"{SIGNAL_PROC}#windowing", {"window": window}))
+    # Window range, shift, survival: these exist only when Signal Processing is on (the platform
+    # windows the stream). With SP off there is no window and none of them applies -- skipping them
+    # is the whole point of the field (platform-signal-processing-applicability.md). _win also guards
+    # against a None window (SP off never produces one; legacy callers always pass an int).
+    if _win:
+        # Window range (conditional on frequency-domain).
+        if freq_domain:
+            if not (_is_pow2(window) and 128 <= window <= 2048):
+                findings.append(Finding(
+                    Group.HARD_REJECT, Severity.HARD_REJECT, "window_out_of_range_fft",
+                    f"Frequency-domain features require the window to be a power of 2 in [128,2048]; {window} is not.",
+                    f"{SIGNAL_PROC}#frequency-domain-features-exception", {"window": window}))
+        else:
+            if not (10 <= window <= 1000):
+                findings.append(Finding(
+                    Group.HARD_REJECT, Severity.HARD_REJECT, "window_out_of_range",
+                    f"Window must be between 10 and 1000 samples; {window} is out of range.",
+                    f"{SIGNAL_PROC}#windowing", {"window": window}))
 
-    # Shift.
-    shift = profile.shift
-    if shift is not None:
-        if shift > window:
+        # Shift.
+        shift = profile.shift
+        if shift is not None:
+            if shift > window:
+                findings.append(Finding(
+                    Group.HARD_REJECT, Severity.HARD_REJECT, "shift_exceeds_window",
+                    f"Sliding shift ({shift}) cannot exceed the window size ({window}).",
+                    f"{SIGNAL_PROC}#sliding-shift-window-overlap", {"shift": shift, "window": window}))
+            elif shift != window:
+                findings.append(Finding(
+                    Group.BAD_MODEL, Severity.ADVISORY, "training_shift_not_window",
+                    f"For training, set the sliding shift equal to the window ({window}); a smaller shift "
+                    f"over-samples the dominant class. Reserve overlap for inference.",
+                    f"{SIGNAL_PROC}#sliding-shift-window-overlap", {"shift": shift, "window": window}))
+        else:
             findings.append(Finding(
-                Group.HARD_REJECT, Severity.HARD_REJECT, "shift_exceeds_window",
-                f"Sliding shift ({shift}) cannot exceed the window size ({window}).",
-                f"{SIGNAL_PROC}#sliding-shift-window-overlap", {"shift": shift, "window": window}))
-        elif shift != window:
-            findings.append(Finding(
-                Group.BAD_MODEL, Severity.ADVISORY, "training_shift_not_window",
-                f"For training, set the sliding shift equal to the window ({window}); a smaller shift "
-                f"over-samples the dominant class. Reserve overlap for inference.",
-                f"{SIGNAL_PROC}#sliding-shift-window-overlap", {"shift": shift, "window": window}))
-    else:
-        findings.append(Finding(
-            Group.BAD_MODEL, Severity.INFO, "shift_unspecified",
-            f"Sliding shift not specified; for training set it equal to the window ({window}).",
-            f"{SIGNAL_PROC}#sliding-shift-window-overlap", {"window": window}))
+                Group.BAD_MODEL, Severity.INFO, "shift_unspecified",
+                f"Sliding shift not specified; for training set it equal to the window ({window}).",
+                f"{SIGNAL_PROC}#sliding-shift-window-overlap", {"window": window}))
 
-    # Window survival (silent loss).
-    if profile.label_column in df.columns and pd.api.types.is_numeric_dtype(df[profile.label_column]):
-        findings += min_run_ok(df, profile.label_column, profile.session_column, window)
+        # Window survival (silent loss). min_run_ok is class-run analysis: it applies only to a
+        # CLASSIFICATION target whose labels are ALL int-coercible. is_classification excludes a
+        # regression VALUE column (an integral target like [60,90,120] is itself fully int-coercible,
+        # so that conjunct alone would not suppress it) and anomaly detection (no classes). Full
+        # int-coercibility excludes a label still carrying a blank/NaN, which would fracture a real run
+        # into a false short one; the blank is a HARD-REJECT the user fixes first (_value_findings).
+        # Reuse _label_ints (never a second coercion path) AND feed min_run_ok the coerced labels so
+        # run lengths use the same canonical integer classes the target block does -- a class written
+        # both "0" and "0.0" is int-coercible (gate passes) but raw-string run detection would split it.
+        if profile.is_classification and profile.label_column in df.columns:
+            labels, had_bad = _label_ints(df, profile.label_column)
+            if labels is not None and not had_bad:
+                sdf = df.assign(**{profile.label_column: labels})
+                findings += min_run_ok(sdf, profile.label_column, profile.session_column, window)
+                # B8 (databuilder-020): per-class window-level yield (INFO) + imbalance (ADVISORY) --
+                # what the platform trains on is WINDOWS, not rows, and the two diverge on fragmented
+                # data. Verdict-neutral; reuses the same coerced sdf so it never runs where min_run_ok
+                # doesn't (SP-off / regression / anomaly / blank-label all skip it).
+                findings += window_yield_findings(sdf, profile.label_column, profile.session_column, window)
+        # short_session_findings is LABEL-INDEPENDENT (rows-per-session only): lifted out of the guard
+        # above so it runs for every task type / label dtype, but kept inside `if _win:` (B5a) so SP-off
+        # still skips it.
         findings += short_session_findings(df, profile.session_column, window)
 
-    # Sampling rate.
-    findings += _rate_findings(df, profile)
+    # Sampling rate. rate_unknown fires in both modes but its SEVERITY is mode-conditional (advisory
+    # under SP off, where window math does not run -- see _rate_findings); mixed_sampling_rate is
+    # windowing-justified, so it is gated with SP.
+    findings += _rate_findings(df, profile, _sp)
 
     # Data type recommendation.
     rec = datatype.recommend_dtype(df, profile.sensor_columns, profile.target_technology)
@@ -240,8 +287,8 @@ def check_dataframe(df: pd.DataFrame, profile: DatasetProfile, window: int, freq
         f"Recommended input data type: {rec['dtype']} ({rec['reason']}).",
         rec["rule_ref"], {"dtype": rec["dtype"]}))
 
-    # Direction features for multi-class gestures.
-    if profile.is_classification and len(profile.gesture_classes) >= 2:
+    # Direction features for multi-class gestures. Per-window features -> SP-only.
+    if _sp and profile.is_classification and len(profile.gesture_classes) >= 2:
         findings.append(Finding(
             Group.BAD_MODEL, Severity.ADVISORY, "enable_lr_features",
             "With two or more directional gesture classes, enable LR_SLOPE and LR_INTERCEPT — they are the "
@@ -264,10 +311,37 @@ def check_dataframe(df: pd.DataFrame, profile: DatasetProfile, window: int, freq
         if nf:
             findings.append(nf)
 
+    # Signal-Processing mode findings. Only when the caller stated the mode (cmd_validate); legacy
+    # callers pass sp_on=None and get none of these, so their reports are byte-identical.
+    #
+    # Declaring SP off suppresses the window checks above on the profile's say-so alone, and the tool
+    # does not yet reconcile "is this really tabular?" against the file (that check is unbuilt). So the
+    # suppression is disclosed, not silent -- ADVISORY, not blocking: blocking would punish the one
+    # user who declared the mode honestly and push them to conceal it. Unverified *suppression* of
+    # checks is what we surface; unverified *addition* (declaring SP on, which only adds checks) is
+    # safe and needs no finding.
+    if sp_on is False:
+        findings.append(Finding(
+            Group.BAD_MODEL, Severity.ADVISORY, "sp_off_unverified",
+            "This profile declares Signal Processing OFF, so the platform trains on each row as an "
+            "independent sample; the window-based checks (window range, sliding shift, window survival, "
+            "direction features, mixed sampling rate) were skipped because they do not apply. The tool "
+            "has not verified the data is actually tabular — confirm one row is a complete observation "
+            "before upload.",
+            f"{SP_APPLICABILITY}#the-decision-rule", {}))
+        if profile.gesture_classes:
+            findings.append(Finding(
+                Group.BAD_MODEL, Severity.FIX_REQUIRED, "sp_off_contradicts_profile",
+                f"The profile sets Signal Processing OFF but declares gesture classes "
+                f"{profile.gesture_classes}. A discrete gesture is a windowed concept; with SP off there "
+                f"is no window. Either set \"signal_processing\": true, or drop gesture_classes — note "
+                f"that dropping them also turns off default-on gesture centering in prep.",
+                f"{SP_APPLICABILITY}#the-two-modes", {"gesture_classes": profile.gesture_classes}))
+
     return _dedupe(findings)
 
 
-def _rate_findings(df: pd.DataFrame, profile: DatasetProfile):
+def _rate_findings(df: pd.DataFrame, profile: DatasetProfile, sp_on: bool = True):
     findings = []
     tcol = profile.time_column
     if tcol and tcol in df.columns:
@@ -281,7 +355,7 @@ def _rate_findings(df: pd.DataFrame, profile: DatasetProfile):
                 dt = np.median(np.diff(np.sort(t)))
                 if dt > 0:
                     rates.append(1.0 / dt)
-        if len(rates) >= 2 and (max(rates) - min(rates)) / min(rates) > RATE_TOLERANCE:
+        if sp_on and len(rates) >= 2 and (max(rates) - min(rates)) / min(rates) > RATE_TOLERANCE:
             findings.append(Finding(
                 Group.BAD_MODEL, Severity.ADVISORY, "mixed_sampling_rate",
                 f"Sessions have different sampling rates (~{min(rates):.1f}–{max(rates):.1f} units⁻¹). "
@@ -290,17 +364,22 @@ def _rate_findings(df: pd.DataFrame, profile: DatasetProfile):
                 f"{SIGNAL_PROC}#sampling-rate-rule-critical-for-our-data-builder", {"rates": [round(r, 2) for r in rates]}))
     elif profile.time_column is None and profile.sampling_rate_hz is None:
         # Rate is known if the profile records it OR declares a time column (centering may have dropped
-        # the time column from the frame, but the rate was still derivable from it).
+        # the time column from the frame, but the rate was still derivable from it). Severity is
+        # mode-conditional: the rate is load-bearing only when the platform windows the data (window
+        # math is in samples), so SP off -> ADVISORY (do not block a legitimately tabular user); SP on
+        # or unstated (legacy sp_on=None -> _sp=True) -> FIX_REQUIRED. B5a carry-out: conditional on the
+        # mode, NOT demoted globally.
+        sev = Severity.FIX_REQUIRED if sp_on else Severity.ADVISORY
         findings.append(Finding(
-            Group.BAD_MODEL, Severity.FIX_REQUIRED, "rate_unknown",
+            Group.BAD_MODEL, sev, "rate_unknown",
             "No time column and no recorded sampling rate. Record the sampling rate (Hz) — window math, "
             "resampling, and session checks all depend on it.",
             f"{SIGNAL_PROC}#sampling-rate-rule-critical-for-our-data-builder", {}))
     return findings
 
 
-def run_checks(path: str, profile: DatasetProfile, window: int, freq_domain: bool = False,
-               holdout_path: str | None = None) -> Report:
+def run_checks(path: str, profile: DatasetProfile, window: int | None, freq_domain: bool = False,
+               holdout_path: str | None = None, sp_on: bool | None = None) -> Report:
     """Standalone file validation: raw-bytes intake + dataframe semantics -> Report."""
     findings = check_raw_file(path, profile)
     scan = csv_io.sniff_raw(path)
@@ -308,11 +387,23 @@ def run_checks(path: str, profile: DatasetProfile, window: int, freq_domain: boo
                                           scan.encoding if scan.encoding != "unknown" else "utf-8")
     findings += read_findings
     if df is not None:
+        # Timestamp order (databuilder-019). validate sees exactly one file = one recording (per
+        # session where a session column exists). SP-gated: with SP off the platform trains on each row
+        # independently, so row order is irrelevant (B5a carry-out). Placed here, NOT in
+        # check_dataframe, so prep's check_dataframe call does not re-run it on the already-combined
+        # frame (which would re-expose the concatenation seams combine deliberately checked per-file).
+        if sp_on is not False:
+            findings += check_time_order(df, profile.time_column, profile.session_column)
         holdout_df = None
         if holdout_path:
             hscan = csv_io.sniff_raw(holdout_path)
+            # Surface the holdout's raw-byte findings too -- they were computed for the encoding then
+            # dropped, so a readable holdout with an illegal inner name / mixed line endings was silently
+            # ignored (databuilder-017, B3 carry-out). Deduped against the training file by run_checks.
+            findings += hscan.findings
             holdout_df, hf = csv_io.read_table(holdout_path, profile.sep_char,
                                                hscan.encoding if hscan.encoding != "unknown" else "utf-8")
             findings += hf
-        findings += check_dataframe(df, profile, window, freq_domain, file_name=path, holdout_df=holdout_df)
+        findings += check_dataframe(df, profile, window, freq_domain, file_name=path,
+                                    holdout_df=holdout_df, sp_on=sp_on)
     return make_report(_dedupe(findings))

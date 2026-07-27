@@ -84,6 +84,49 @@ jobs:
           set -e
           test "$code" -eq 4
 
+      # signal_processing contrast (databuilder-012 B5a): two profiles differing ONLY by the field,
+      # over the SAME out-of-range window (5). SP-on => window_out_of_range (exit 2); SP-off => the
+      # window checks do not apply, exit 0. This is the fixture that can tell the two modes apart --
+      # both existing legs above return the same code either way. Profiles are synthesized (no SP-off
+      # profile ships; the shipped demo is left windowed on purpose).
+      - name: Synthesize SP-on / SP-off profiles (window 5, no gesture classes)
+        shell: bash
+        run: |
+          python -c "import json; base={'dataset_name':'t','label_column':'class','sensor_columns':['acc_x','acc_y','acc_z','gyro_x','gyro_y','gyro_z'],'separator':'comma','sampling_rate_hz':100,'task_type':'multiclass_classification','class_encoding':{'map':{'a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7}},'window':{'candidates':[5],'shift':5,'frequency_domain_features':False}}; json.dump({**base,'signal_processing':True}, open('sp_on.json','w')); json.dump({**base,'signal_processing':False}, open('sp_off.json','w'))"
+
+      - name: Validate good fixture, SP on, window 5 (expect exit 2)
+        shell: bash
+        run: |
+          set +e
+          python data-builder.py validate good.csv --profile sp_on.json
+          code=$?
+          set -e
+          test "$code" -eq 2
+
+      - name: Validate good fixture, SP off (expect exit 0 — window checks skipped)
+        shell: bash
+        run: python data-builder.py validate good.csv --profile sp_off.json
+
+      # WILL_LOSE_DATA / exit 3 (databuilder-018 B1a made this reachable). Short class runs (10 rows)
+      # shorter than the window (20) survive validate (labels are strings there) but, once prep relabels
+      # to int, window-survival fires -> class_run_below_window -> exit 3. Rate is recorded (no
+      # rate_unknown) and there are no gesture classes (no centering), so the verdict is exactly
+      # WILL_LOSE_DATA, not FIX_REQUIRED. This is the first CI assertion of exit 3 (sprint acceptance).
+      - name: Synthesize short-run fixture + windowed profile (exit-3 case)
+        shell: bash
+        run: |
+          python -c "import csv; w=csv.writer(open('short.csv','w',newline='')); w.writerow(['acc_x','acc_y','acc_z','class']); [w.writerow([(i*7+a)%100 for a in range(3)]+[(i//10)%3]) for i in range(180)]"
+          python -c "import json; json.dump({'dataset_name':'s','label_column':'class','sensor_columns':['acc_x','acc_y','acc_z'],'separator':'comma','sampling_rate_hz':100,'task_type':'multiclass_classification','class_encoding':{'map':{'a':0,'b':1,'c':2},'continuous_classes':[0,1,2],'gesture_classes':[]},'window':{'candidates':[20],'shift':20,'frequency_domain_features':False}}, open('short.json','w'))"
+
+      - name: Prep short-run fixture (expect exit 3, WILL_LOSE_DATA)
+        shell: bash
+        run: |
+          set +e
+          python data-builder.py prep short.csv --profile short.json --out out_short.csv
+          code=$?
+          set -e
+          test "$code" -eq 3
+
       - name: Run test suite
         shell: bash
         env:

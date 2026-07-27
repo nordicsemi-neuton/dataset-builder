@@ -41,8 +41,12 @@ input/           ← Drop zone for incoming material. Toss any new material in h
                    Empties out after processing. Not an archive (the archive is raw/).
 raw/             ← Raw sources, read-only. Subfolders are set up by bootstrap for the project's
                    sources; they grow as needed (depth is free).
-  platform-docs/ (platform documentation: capabilities, rules, constraints on data)
+  platform-docs/ (platform documentation: capabilities, rules, constraints on data — also the
+                  immutable baseline the lint drift-check compares against the live docs)
   samples/       (sample sensor CSVs — to understand the input format)
+  harvested-practice/ (practitioner knowledge harvested from support work, anonymized)
+  owner-notes/   (platform facts stated by the owner but NOT in the captured docs — kept out of
+                  platform-docs/ so the drift check stays honest; each carries a verification task)
 wiki/            ← Compiled knowledge. Managed by Claude. Flat, depth = 1.
   decisions/     (ADRs — what was decided and why; linked via supersession)
   discovery/     (knowledge about the outside world: sensors, formats, scenarios, the platform as a product)

@@ -1,7 +1,7 @@
 ---
 type: architecture
 status: active
-updated: 2026-06-25
+updated: 2026-07-25
 implementation:
   - ../../src/data_builder/validate.py
   - ../../src/data_builder/csv_io.py
@@ -67,7 +67,28 @@ For sensor data (gyroscope, accelerometer, magnetometer, EMG, …) used with **S
 - **Each row = device readings for one unit of time, plus a label column as the target.** One row per sample, time-ordered.
 - **Do not shuffle signal labels and do not encode/transform the signal** before upload — the platform windows the raw time series itself.
 - The documented example column layout (gesture demo): `acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z, class` (6 sensor axes + target). Column **names are author-chosen** but must obey the header rules above; this naming is a convention, not a platform-enforced schema.
-- The window size (e.g. 8, or 99 at 100 Hz) governs how many consecutive rows form one training sample — see [signal-processing contract](platform-signal-processing.md). Rows are *not* pre-grouped in the CSV; the platform groups them.
+- The window size (e.g. 8, or 99 at 100 Hz) governs how many consecutive rows the platform groups into one feature-extraction window — see [signal-processing contract](platform-signal-processing.md). Rows are *not* pre-grouped in the CSV; the platform groups them.
+
+> ### `[needs clarification]` — does "≥20 samples per class" count rows or windows?
+>
+> **Unresolved, and the captured docs cannot settle it — they use "sample" in both senses.**
+>
+> | reading | evidence |
+> |---|---|
+> | **sample = row** | `pipeline-signal-processing-windowing.md` throughout: *"Window size … specifies how many samples"*, *"Window size minimum is 10 samples"*, *"each sub-window must contain at least 10 samples"*, *"consecutive windows share overlapping samples"* |
+> | **sample = one window's output** | `get-started-2-cleaning-combining-preprocessing.md:90`: *"for each set of 99 **records** per axis …, Neuton will extract features and represent the data as a **single training sample (1 row)**"*; also `:92`, `:119` (*"96 features per sample"*), `:137` |
+>
+> The rule itself (`pipeline-dataset-requirements.md:38`) says only "20 samples" and does not disambiguate.
+>
+> **What the tool does today:** `MIN_SAMPLES_PER_CLASS` in [`validate.py`](../../src/data_builder/validate.py) counts **rows**. **Treat that as unverified, not as confirmed correct.** The risk is asymmetric: if the platform means windows, we pass files it will reject — the same class of failure as a gate that lies.
+>
+> **The strongest argument for rows — an inference, not a source.** This rule is enforced by the platform **at upload**, and Signal Processing is pipeline **step 5**: at upload time the platform does not yet know the window size, and if [SP is left off](platform-signal-processing-applicability.md) there will never be a window at all. A check that must fire at upload can only count rows. That is a good argument and still not a citation — record it as reasoning, don't promote it to a rule ([process P-18](../principles/process.md)).
+>
+> **The counter-argument is not weak either.** On the "sample = training example" reading, a class with 20 rows at a window of 100 yields *zero* training examples, so a row-count minimum under-enforces by roughly the window size — which is a real failure in the dangerous direction.
+>
+> **How to resolve it (cheap, empirical):** upload a dataset with ~25 rows per class and a window of 100. Accepted ⇒ rows. Rejected for insufficient samples ⇒ windows. Until then this stays `[needs clarification]` and **no code change is made in either direction**.
+>
+> *History: an internal reading first asserted "windows" from our own paraphrase; the correction then asserted "rows" and claimed the docs were consistent. Both were unsourced. Caught at the spec gate, 24.07.2026.*
 
 ## Test / holdout dataset
 
@@ -100,9 +121,13 @@ One-dataset-per-model means per-class/per-session recordings must be concatenate
 
 Implemented in `src/data_builder/`: format/value/structure validation in [`validate.py`](../../src/data_builder/validate.py) (raw-bytes intake in [`csv_io.py`](../../src/data_builder/csv_io.py), numeric repair in [`normalize.py`](../../src/data_builder/normalize.py)), assembly in `combine.py`/`relabel.py`, export in `pipeline.py`. This page is the spec those modules satisfy; the engine architecture is [ADR-0002](../decisions/adr-0002-data-builder-engine-architecture.md). Scope is gesture classification first (see the spec for deferred task types). Raw docs remain in `sources:` for re-verification.
 
+Since [ADR-0005](../decisions/adr-0005-zip-intake-and-head-bound.md) (25.07.2026) the intake layer also resolves a **`.zip`** upload to its single CSV member before applying the checks above, and checks the member's name against the file-name rule (`zip_inner_file_name`, see the open item below).
+
 ## Open items / to re-verify against source
 
 - Exact meaning of "The number of lines must be excluded from the training dataset" (no index column vs. row-count limit).
 - Header handling when concatenating files (single vs repeated header).
 - Whether a timestamp column is required or optional for Signal-Processing datasets (the demo CSV has **no** explicit time column — time is implicit via fixed sampling rate). `[not stated]` — likely optional given fixed-rate rows.
 - Maximum dataset/file size: **not stated** anywhere in the captured docs. (Project assumption elsewhere: training sets usually ≤ ~100 MB — that is *our* assumption, not a platform-stated limit.)
+- **Does the platform read the file name *inside* a `.zip`?** The file-name character rule above is stated for *the uploaded file's name*; the docs are silent on an archive member's name. Our intake emits `zip_inner_file_name` at FIX_REQUIRED (a hedged warning, not a HARD_REJECT) pending an answer (ADR-0005, `databuilder-013`). `[needs clarification]` — resolve by uploading a `.zip` whose member has a forbidden character and observing acceptance.
+- **Exactly one CSV inside a `.zip`?** The docs say only "`.csv` or `.zip`". Our `zip_multiple_files` is justified by *our* inability to pick a member, not a stated platform rule. `[needs clarification]`.

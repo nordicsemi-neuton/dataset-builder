@@ -175,6 +175,116 @@ class TestFeatureSeparability(unittest.TestCase):
         r = _run(p, "--label-col", "class", "--sensor-cols", *SENSORS, "--window", "20")
         self.assertEqual(r.returncode, 2)
 
+    def test_every_family_reachable_invariant(self):
+        # databuilder-015 D2a-3: on 7c48e79 build_recommendation can emit only 17 of 22 features / 6
+        # of 9 families. Enumerate every input combination and require the union to be all 22.
+        import importlib.util
+        import itertools
+        path = os.path.join(REPO, SCRIPT)
+        spec = importlib.util.spec_from_file_location("fs_invariant", path)
+        fs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fs)
+        all_names = {f[1] for f in fs.FEATURES}
+        all_fams = set(fs.FFAM.values())
+        subsets = [frozenset(s) for r in range(len(fs.TRIGGERABLE_FAMILIES) + 1)
+                   for s in itertools.combinations(fs.TRIGGERABLE_FAMILIES, r)]
+        reached = set()
+        for dtype in ("int8", "int16", "int32", "float32"):
+            for blind in (False, True):
+                for impulse in (False, True):
+                    for trig in subsets:
+                        rec = fs.build_recommendation(dtype, blind, impulse, trig)
+                        for g in rec["enable"]:
+                            reached.update(g["features"])
+        self.assertEqual(reached, all_names, f"unreachable features: {sorted(all_names - reached)}")
+        fam_reached = {fs.FFAM[k] for k, n, f in fs.FEATURES if n in reached}
+        self.assertEqual(fam_reached, all_fams)
+
+    def _one_axis(self, d, per_class_s0, name):
+        # 3 classes, 6 axes; every axis is shared noise except s0, which carries the class signal.
+        rng = np.random.RandomState(0)
+        n = 900
+        frames = []
+        for c in range(3):
+            data = {s: 0.05 * (np.convolve(rng.randn(n + 32), np.ones(8) / 8, "same")[:n])
+                    for s in SENSORS}
+            data["acc_x"] = per_class_s0(c, n, rng)
+            df = pd.DataFrame(data); df["class"] = c
+            frames.append(df)
+        return _write(pd.concat(frames, ignore_index=True), d, name)
+
+    def _run_json(self, p):
+        r = _run(p, "--label-col", "class", "--sensor-cols", *SENSORS, "--window", "100", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_crossing_family_reachable_end_to_end(self):
+        # A square wave of a class-dependent frequency: same amplitude, different crossing rate.
+        d = tempfile.mkdtemp()
+        t = np.arange(900)
+        p = self._one_axis(d, lambda c, n, rng: np.sign(np.sin(2 * np.pi * (2 + 20 * c) * t / n)) * 1.0
+                           + 0.5 * rng.randn(n), "cross.csv")
+        rep = self._run_json(p)
+        groups = [g["group"] for g in rep["recommendation"]["enable"]]
+        self.assertIn("Crossing rate", groups)
+        self.assertIn("Crossing", rep["triggered_families"])
+
+    def test_variation_family_reachable_end_to_end(self):
+        d = tempfile.mkdtemp()
+        # roughness (successive-difference variation) grows with class, at matched overall scale.
+        p = self._one_axis(
+            d, lambda c, n, rng: (rng.randn(n) if c == 2
+                                  else np.convolve(rng.randn(n + 40), np.ones(4 + 10 * c) / (4 + 10 * c),
+                                                   "same")[:n] * (1 + c)), "var.csv")
+        rep = self._run_json(p)
+        self.assertIn("Signal variation", [g["group"] for g in rep["recommendation"]["enable"]])
+        self.assertIn("Variation", rep["triggered_families"])
+
+    def test_autocorrelation_family_reachable_end_to_end(self):
+        # Smoothing bandwidth differs per class, then energy is re-normalised so std/rms match —
+        # short-lag self-similarity (autocorrelation) is what is left to separate them.
+        def sig(c, n, rng):
+            tau = 1 + c * c * 15                       # 1, 16, 61 -> very different lag-1 autocorr
+            x = np.convolve(rng.randn(n + 4 * tau), np.ones(tau) / tau, "same")[:n]
+            return (x - x.mean()) / (x.std() + 1e-9)
+        d = tempfile.mkdtemp()
+        p = self._one_axis(d, sig, "auto.csv")
+        rep = self._run_json(p)
+        self.assertIn("Autocorrelation", rep["triggered_families"])
+        self.assertIn("Autocorrelation", [g["group"] for g in rep["recommendation"]["enable"]])
+
+    def test_untriggered_recommendation_matches_empty_trigger(self):
+        # [guard] a dataset that triggers no new family gets exactly the pre-fix recommendation.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fs_guard", os.path.join(REPO, SCRIPT))
+        fs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fs)
+        d = tempfile.mkdtemp()
+        rng = np.random.RandomState(2)
+        frames = []
+        for c in (0, 1, 2):                       # pure level/offset separation on acc_x
+            data = _noise(300, rng, scale=0.05)
+            data["acc_x"] = data["acc_x"] + c * 5.0
+            df = pd.DataFrame(data); df["class"] = c; frames.append(df)
+        p = _write(pd.concat(frames, ignore_index=True), d)
+        rep = self._run_json(p)
+        if not rep["triggered_families"]:
+            baseline = fs.build_recommendation(rep["dtype"], bool(rep["magnitude_blind_pairs"]),
+                                               any(pc["family"] == "Impulse/Shape"
+                                                   for pc in rep["per_class_top"]), ())
+            self.assertEqual(rep["recommendation"]["enable"], baseline["enable"])
+
+    def test_triggered_families_sorted_cross_process(self):
+        # determinism is this script's headline contract; the new field must be sorted, not set-order.
+        d = tempfile.mkdtemp()
+        t = np.arange(900)
+        p = self._one_axis(d, lambda c, n, rng: np.sign(np.sin(2 * np.pi * (2 + 20 * c) * t / n)) * 1.0
+                           + 0.5 * rng.randn(n), "cross2.csv")
+        a = self._run_json(p)["triggered_families"]
+        b = self._run_json(p)["triggered_families"]
+        self.assertEqual(a, b)
+        self.assertEqual(a, sorted(a))
+
     def test_extreme_values_emit_valid_json(self):
         # Absurd sensor magnitudes must not produce a bare NaN token (invalid JSON).
         d = tempfile.mkdtemp()

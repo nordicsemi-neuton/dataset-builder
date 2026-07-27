@@ -32,13 +32,19 @@ boxes — if a command fails, fix the environment per runtime.md; never replace 
 install anything beyond `requirements.txt`. From the repo root:
 
 ```
-<python> data-builder.py validate <file.csv> --profile output/<name>.profile.json --window <N> [--holdout <holdout.csv>] [--json]
+<python> data-builder.py validate <file.csv> --profile output/<name>.profile.json [--window <N>] [--holdout <holdout.csv>] [--json]
 ```
+
+`--window <N>` is the intended window size; omit it only when the profile already records
+`window.candidates` **or** sets `"signal_processing": false` (a tabular dataset the platform does not
+window — see the SP row below).
 
 The verdict and exit code: `0` = PASS, `2` = FIX_REQUIRED (the platform would reject it or a value must be
 corrected), `3` = WILL_LOSE_DATA (accepted, but a class/window would silently disappear — an **upper
 bound** to confirm in the platform's Processed Data view). The checks run in three buckets — file-format
-hard-rejects, silent-loss (window survival), and model-quality advisories.
+hard-rejects, silent-loss (window survival), and model-quality advisories. If the profile sets
+`"signal_processing": false`, the window-based checks do not apply and are skipped; you will see an
+`sp_off_unverified` advisory reminding you to confirm the data is genuinely tabular.
 
 ## 3. Report back
 

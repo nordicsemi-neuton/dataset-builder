@@ -1,7 +1,7 @@
 ---
 type: decision
 status: active
-updated: 2026-07-13
+updated: 2026-07-25
 sources:
   - ../architecture/platform-dataset-requirements.md
   - ./adr-0003-scipy-on-resample-path.md
@@ -16,6 +16,40 @@ Date: 25.06.2026
 > **Amendment (13.07.2026):** the "numpy/pandas-only (no scipy)" constraint below is **narrowed** by
 > [ADR-0003](adr-0003-scipy-on-resample-path.md) — `scipy.signal` is permitted on the resampling path
 > (`resample.py`) for anti-aliasing. Everything else in this ADR stands (pytest/jsonschema still rejected).
+>
+> **Amendment (25.07.2026):** the raw-bytes intake layer (`check_raw_file`/`csv_io.sniff_raw`) is
+> **extended** by [ADR-0005](adr-0005-zip-intake-and-head-bound.md) — it now unwraps a `.zip`
+> container to its single member (both `sniff_raw` and `read_table` through one helper) and checks
+> the inner member name, in addition to encoding / line endings / header / delimiter / field-count.
+> The field-count head bound is raised from 64 KB to 1 MiB (line-aligned). The two-layer split,
+> Finding/Report taxonomy and exit codes 0/2/3/4 are unchanged.
+>
+> **Amendment (25.07.2026):** [ADR-0006](adr-0006-signal-processing-mode.md) narrows two clauses for
+> Signal-Processing mode. (a) `check_dataframe`'s "window range, window survival" (below) are
+> **conditional** on the profile's `signal_processing` mode — skipped on `validate` when it is off.
+> (b) "**nothing … is auto-applied**" (below) is narrowed: reading `signal_processing: false` and
+> suppressing the window checks is an auto-application, disclosed via an `sp_off_unverified` advisory
+> rather than performed silently. Scope is the `validate` surface only in B5a; `prep`/`quality-report`
+> are unchanged until B5b (`databuilder-016`). Exit codes and the Finding/Report contract stand.
+>
+> **Amendment (25.07.2026):** [ADR-0007](adr-0007-sp-off-prep-quality-surface.md) narrows the
+> **"Centering (gesture datasets) … default-on when the profile is classification and declares
+> `gesture_classes`"** clause below: centering is default-on only when Signal Processing is **not off**.
+> With `signal_processing: false`, `prep` **skips centering** and refuses `--resample` (both are windowing
+> / continuous-signal operations that corrupt tabular rows); an SP-off profile that still declares
+> `gesture_classes` is a contradiction (`sp_off_contradicts_profile`), not a centering trigger. The
+> incentive gradient (the honest tabular file still writes) is load-bearing. Exit codes and the
+> Finding/Report contract stand.
+>
+> **Amendment (27.07.2026).** [ADR-0004](adr-0004-resample-integer-preservation.md) narrows the
+> "**sensor values are never cast to int (floats preserved bit-for-bit)**" clause below (in "Flag, never
+> silently drop/truncate"): on the **resampling path only**, a sensor column whose every source value is
+> a whole number has its resampled estimates **re-quantized** (`np.round`) to the sensor's integer
+> resolution — **the column stays `float64`, never cast to an integer storage dtype** — so resampling
+> does not fabricate decimal precision, disclosed via a verdict-neutral `resample_integer_preserved`
+> finding. The non-resampled path is unchanged (byte-identical). The writer is unmodified. Exit codes and
+> the Finding/Report contract stand. *(Dated after the ADR-0005/0006/0007 notes above: ADR-0004's number
+> was reserved for this task while those landed first.)*
 
 ## Context
 

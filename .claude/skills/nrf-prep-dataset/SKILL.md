@@ -47,8 +47,14 @@ boxes — if a command fails, fix the environment per runtime.md; never replace 
 install anything beyond `requirements.txt`. From the repo root:
 
 ```
-<python> data-builder.py prep <recording1.csv> [recording2.csv ...] --profile output/<name>.profile.json --out output/<name>_upload_ready.csv --window <N> [--json]
+<python> data-builder.py prep <recording1.csv> [recording2.csv ...] --profile output/<name>.profile.json --out output/<name>_upload_ready.csv [--window <N>] [--json]
 ```
+
+- **Tabular data** (one row = one complete, independent observation, not a time-sample of a stream): set
+  `"signal_processing": false` in the profile and **omit `--window`**. `prep` then does not center or
+  resample it (both assume a windowed signal), and discloses that it has not itself confirmed the data is
+  tabular — see [Signal-Processing applicability](../../../wiki/architecture/platform-signal-processing-applicability.md).
+  Otherwise (a windowed inertial stream) pass `--window <N>` as before.
 
 - **Centering is default-on for gesture datasets** (it centers the classes the profile marks as
   `gesture_classes` so each gesture's motion peak sits mid-window, and trims `continuous_classes` like

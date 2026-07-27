@@ -7,6 +7,10 @@
   "additionalProperties": false,
   "required": ["dataset_name", "label_column", "sensor_columns", "separator", "task_type"],
   "properties": {
+    "$comment": {
+      "type": "string",
+      "description": "Optional free-text note carried by worked examples; ignored by the loader."
+    },
     "dataset_name": {
       "type": "string",
       "description": "Human label for this dataset/model (one dataset trains one model)."
@@ -117,6 +121,10 @@
           "description": "If true, window must be power-of-2 in 128-2048 and the min contiguous run per class escalates to 128."
         }
       }
+    },
+    "signal_processing": {
+      "type": ["boolean", "null"],
+      "description": "Whether the platform's Signal Processing (windowing) will be ON for this solution. true = windowed (gesture/activity/regression over a stream); false = tabular (one row = one independent observation, no windowing). Omit if unknown. When false, the validator skips the window-based checks. NO default here on purpose: the platform's own default is off (owner-stated, unconfirmed), and materialising a default would assert a mode the user has not confirmed. See wiki/architecture/platform-signal-processing-applicability.md."
     },
     "holdout_path": {
       "type": ["string", "null"],

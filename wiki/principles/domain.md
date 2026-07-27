@@ -1,17 +1,18 @@
 ---
 type: principles
 status: active
-updated: 2026-07-13
+updated: 2026-07-23
 sources:
   - Field experience (practitioner knowledge; no external source document).
   - ../../raw/harvested-practice/2026-07-13-resampling-decision-procedure.md
+  - ../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md
   - ../../scripts/diagnostics/window_survival_sim.py
   - ../../scripts/diagnostics/feature_mask_decoder.py
   - ../../scripts/preprocessing/center_training_data.py
   - ../../scripts/postprocessing/postprocessing_pipelines.py
   - ../../scripts/firmware/firmware_postprocessing_ema_unknown_margin.c
   - ../../scripts/firmware/firmware_median3_filter.c
-tags: [principles, domain, signal, windowing, features, postprocessing, gesture]
+tags: [principles, domain, signal, windowing, features, postprocessing, gesture, holdout, evaluation, regression]
 ---
 
 # Domain principles — inertial data preparation & modeling
@@ -113,7 +114,7 @@ Rules drawn from field experience with common data-prep scenarios. These are **e
 - **Frequency-domain (FFT)** features need a power-of-2 window in 128–2048 ([feature page](../architecture/platform-feature-extraction.md)); don't switch windows just to unlock them unless time-domain separability is insufficient.
 
 **Why:** the platform extracts and (optionally) selects features itself, but *which families are enabled* is the user's lever. A measured pass turns "enable the direction features" into an evidence-backed full set and catches the magnitude-blind pairs that silently conflate; the INT16 and first-experiment cautions avoid two common ways an early model is led astray (unstable moments, premature pruning).
-**When to apply:** preparing any multi-class gesture/activity dataset (a required step of the build, [feature-advice](../../.claude/skills/feature-advice/SKILL.md)); any "which features should I enable / why don't classes separate?" question.
+**When to apply:** preparing any multi-class gesture/activity dataset (a required step of the build, [feature-advice](../../.claude/skills/nrf-feature-advice/SKILL.md)); any "which features should I enable / why don't classes separate?" question.
 **Precedent:** the 8-person wrist-gesture build — magnitude-only Cohen's-d ≈ 0.5 on left/right, up/down and CW/CCW (blind); direction lived in signed level (acc_z mean for up/down, gyro_x mean for rotation) and gyro_y asymmetry (Percentage of Signal over Zero/Mean for left/right); double-thumb-tap isolated by Hjorth Mobility; INT16 ⇒ Skewness/Kurtosis held back.
 **Source:** this session (30.06.2026); field experience (practitioner knowledge); [feature extraction](../architecture/platform-feature-extraction.md). Related: [P-02](#p-02--training-sliding-shift--window-size-heavy-overlap-is-an-inference-only-tool) (inference overlap), [P-06](#p-06--direction-discrimination-requires-lr_slope--lr_intercept-the-only-signed-asymmetry-features).
 
@@ -174,3 +175,96 @@ Almost every real dataset has **both**, so **step 1 is always to measure the act
 **When to apply:** any classification/gesture dataset before centering or feature-separability analysis; whenever a profile arrives with a `gesture_classes`/`continuous_classes` split already filled in (confirm it, do not trust it). Not applicable to regression (no classes) or anomaly detection (unlabeled) — skip cleanly.
 **Precedent:** a real `build-dataset` run centered a dataset without ever asking the physical meaning of each class or the continuous/discrete split — the Stage 0 "hard gate" existed only as prose and was walked past to the auto-centering `prep`. Drove [skills-007](../../specs/skills-007-class-nature-gate.md): the gate became a structural always-stop with a batched echo-back, the same confirmation was added to `prep-dataset`, and this rule — previously only in `build-dataset` skill prose (`SKILL.md:41`) — was lifted into the wiki here.
 **Source:** this session (13.07.2026); [skills-007](../../specs/skills-007-class-nature-gate.md). Related: [P-05](#p-05--center-discrete-gestures-keep-continuous-classes-raw-never-center-across-class-boundaries), [P-06](#p-06--direction-discrimination-requires-lr_slope--lr_intercept-the-only-signed-asymmetry-features), [P-10](#p-10--always-include-an-idle--unknown-class-to-prevent-false-detections), [P-11](#p-11--reconcile-sensor-scale-across-sources-gravity-at-rest-is-the-probe-but-motion-invalidates-it).
+
+## P-16 — Choose the holdout axis by what you need to prove; report the withheld fraction per class
+
+**Rule:** Decide the holdout **before the first training run**, and pick its axis from the data's grouping structure, in descending order of what the score proves: **unseen people** > **unseen sessions** > **time-tail within a session** > the platform's automatic split. State the claim the chosen rung actually licenses — a holdout whose held-out contributors also appear in training through other recordings is a new-session result, not a cross-user one, however it is labelled. Report the **per-class withheld fraction**, never only the aggregate, and preserve the class ratio (for a continuous target, the target distribution) across the split. **A class with two or fewer recordings cannot be held out interpretably** — say so rather than reporting its score.
+**Why:** On continuous windowed data an automatic per-window split places near-identical neighbouring windows on both sides and inflates the result; the gap between a strict holdout and the easy split *is* the generalization cost the easy split hides. And "one whole recording per class" is uniform in recordings while being wildly non-uniform in data — it can withhold ~40% of a thin class and ~7% of a fat one, so the design damages exactly the classes least able to absorb it and then measures the damage as a model weakness.
+**When to apply:** every dataset build, before the export — not after results come back. Reversing toward a stricter holdout once results look good is not an honest move.
+**Precedent:** a four-class activity set where a uniform per-class recording holdout withheld ~41% of the thinnest class and ~7% of the fattest; the thin classes then scored worst, and the split had caused part of the result it was measuring.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §1.
+
+## P-17 — Class survival is not event yield; imbalance is a window-level quantity
+
+> **Retracted 24.07.2026 — this principle originally also asserted that the platform's *minimum samples
+> per class* counts windows. That clause is withdrawn as unproven, in either direction.** The captured
+> platform docs use "sample" in **both** senses (see the `[needs clarification]` box in
+> [dataset requirements](../architecture/platform-dataset-requirements.md)), so neither reading is
+> established. The tool currently counts rows; treat that as unverified rather than confirmed, and make
+> **no change in either direction** until the empirical check recorded there is run. Do not cite this
+> principle for the minimum-samples rule.
+>
+> *Twice-wrong history, kept as the precedent for [process P-18](process.md): the first claim came from
+> our own paraphrase; the "correction" then asserted the opposite and wrongly stated the docs were
+> consistent. Both were unsourced generalisations from a partial read.* Everything below — event yield
+> and window-level imbalance — is independent of this and stands.
+
+**Rule:** [P-01](domain.md) asks whether a class *survives* (longest contiguous run ≥ window). Also report **event yield**: the fraction of that class's labelled events that actually produce a pure training window. The platform's window grid is fixed from the start of the file, so an event only slightly longer than the window lands one only occasionally. Separately, **class imbalance is a window-level quantity**, since classes differ in how much data survives windowing and how many windows are discarded for crossing a boundary — so quote the ratio the model actually trains on, not the row ratio. (The platform's ≥20-samples-per-class minimum is *not* part of this: it counts rows. See the box above.)
+**Why:** "The class survives" and "every event is kept" are different claims, and stating the second from the first is wrong in the user's favour, which is the dangerous direction. A row-level imbalance figure can understate what the model sees by more than a factor of two.
+**When to apply:** any window-survival report, and any imbalance figure quoted to a user.
+**Precedent:** a two-class set whose events were all longer than the chosen window — the class survived comfortably while roughly a third of its events yielded no pure window; and the same file reading ~5:1 imbalance by row against ~11:1 by surviving window, with about a fifth of candidate windows dropped as mixed.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §2.
+
+## P-18 — Centering is also segmentation: announce the discard, then quantify it
+
+**Rule:** Centering does not merely shift rows — it detects events, emits one window per event, and **discards everything between events**. On a sparse recording that is legitimately most of the file. Say so **before** the pass, and after it report rows in, rows out, and events detected **per class**. No separate trimming step is needed.
+**Why:** A large silent shrink is indistinguishable from a bug, and a *partial* loss that goes unreported is worse than a total one, which at least fails loudly. Users whose data "gets demolished by preprocessing" are the reason this tool exists; producing that experience ourselves, without explanation, is the failure mode to avoid.
+**When to apply:** every centering pass, in the skill flow and in any report the user reads.
+**Precedent:** sparse gesture recordings shrinking by roughly two thirds to over nine tenths under centering — every discarded row correct, none of it announced in advance.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §3.
+
+## P-19 — Confirm event separability against the detector, not only physical meaning
+
+**Rule:** [P-15](domain.md) establishes each class's physical meaning; that is necessary and **not sufficient**. Gap-less rhythmic repetition is **continuous to the detector** whatever the class is called: if the events are performed without pauses the signal envelope never falls below threshold and the whole block is detected as one active region. After the class-nature table is confirmed, run the centering pass and **read the segment count per class** — a class yielding about one segment per recording is continuous to the pipeline no matter how the user described it. Densely-packed short events are also strongly window-dependent: shorter windows recover far more of them.
+**Why:** The user's physical description and the detector's view can disagree, and the detector's view determines the outcome. A user can correctly say "one tap, fire once per tap" and still produce a single undivided block.
+**When to apply:** the class-nature gate, before committing to a centering configuration.
+**Precedent:** a tap class described correctly as discrete whose envelope exceeded threshold across the entire block, yielding ~1 segment; and a set of a few hundred short events where a long window recovered barely a dozen while shorter windows recovered most.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §3.
+
+## P-20 — A class with wide cross-subject spread can invert into an over-predicting sink
+
+**Rule:** Watch for a class with near-total recall and roughly half precision that absorbs its neighbours. Cause: its amplitude varies widely across people, so weak instances resemble the quiet class and strong ones resemble the energetic class, and it spreads across everyone else's territory. **This is a data-consistency problem — no feature set or window size addresses it.** The fix is consistency at the source: recollect with a controlled execution, or merge the class. Related: a quiet/"unknown" class **carved out of rest periods is narrower than real background** — record it on purpose ([P-10](domain.md)).
+**Why:** Distinct from the familiar weak-class-dies pattern ([P-07](domain.md)) and it points the opposite way — adding such a class has been observed to *lower* overall accuracy substantially, so the instinct to add a class to fix confusion makes it worse.
+**When to apply:** reading back a confusion matrix; deciding whether to add an idle/background class.
+**Precedent:** a two-class model that dropped from ~86% to ~68% holdout accuracy when a third class was added, the new class reaching ~100% recall at ~51% precision and absorbing both others.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §4.
+
+## P-21 — When direction features are confirmed enabled and a mirror pair still collapses, merge rather than tune
+
+**Rule:** [P-06](domain.md) says a mirror pair needs the signed/direction features. If those features are confirmed enabled — **read from the actual configuration, not assumed** — and the pair still collapses, the distinction is not resolvable by that sensor in that placement. **Merge the two classes**: it is a relabel, costs no re-collection, and removes the confusion outright. Further feature or window tuning does not.
+**Why:** Without the confirmation step the same symptom has two opposite treatments (enable features vs. merge), and guessing wrong costs either a wasted training round or an unnecessary class merge. With it, the call is decided by evidence.
+**When to apply:** any persistent left/right, up/down or clockwise/counter-clockwise confusion after the first trained result.
+**Precedent:** a multi-zone recognition set where every direction feature was verified enabled from the uploaded configuration and a left/right pair still confused; merging the pair removed the dominant error and the remaining classes were unaffected.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §4.
+
+## P-22 — The gravity probe cannot see a gyroscope or single-axis unit slip; use two further probes
+
+**Rule:** [P-11](domain.md)'s at-rest gravity probe detects a mismatched **accelerometer range** and nothing else — the gyroscope reads near zero at rest and offers no reference. Add two probes that do work: compare **per-source, per-axis distributions** (spread and range) against the cohort, and check for **fractional values on an axis that should be integral**. And **validate any rescale by where you put it**: route the **un-rescaled** batch into the holdout, so a correct factor shows that class scoring normally on data the correction never touched.
+**Why:** A single-axis unit slip is invisible to the standard probe and survives into training as a systematically wrong feature for one contributor. The holdout-routing trick converts a judgement-call transform into a checkable one at no extra cost.
+**When to apply:** the scale-reconciliation step, whenever sources come from more than one device or contributor.
+**Precedent:** one contributor's single gyroscope axis stored in physical units while everyone else's was in raw counts — invisible to the gravity probe, obvious to both added probes.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §5.
+
+## P-23 — Inspect the rows driving a storage-type recommendation before accepting it
+
+**Rule:** Storage-type recommendation is driven by extreme and fractional values, so **a handful of malformed rows can push an entire integer dataset to floating point**, doubling model input footprint for no benefit. Read the rows responsible before accepting FLOAT32 over INT16. Two related signatures: a **frozen column** — one or two axes stuck at a fixed value, jumping between discrete regimes while the other axes move normally, which is a per-column export fault and not a property of the motion; and **resampling**, which produces fractional values by interpolation and so silently converts an integer dataset to floats — round back where every source column was integral, or the file carries many digits of fabricated precision ([P-11](domain.md) keeps data raw INT16 for exactly this reason).
+**Why:** The recommendation is a summary of the extremes, so it reports the corruption rather than the data. Accepting it silently costs the user footprint and fidelity, and hides a genuine data fault behind a plausible-looking type choice.
+**When to apply:** whenever a dtype recommendation comes back wider than expected, and after every resampling pass.
+**Precedent:** a set where three corrupt rows were the sole reason FLOAT32 was recommended over INT16; and a resampled export carrying ~16 significant digits from a sensor whose true resolution was one count.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §5.
+
+## P-24 — For a continuous target, report the null model before training
+
+**Rule:** Before training a regression task, compute and report the **null model** — the error of always predicting the training mean — on the same data the model will be scored on. A model that does not beat it has learned nothing, whatever its absolute error reads. Also check the split: a holdout whose **target variance is far below** the training set's makes the constant predictor hard to beat and produces an uninterpretable result.
+**Why:** An error figure is meaningless without the baseline it must beat, and reporting it alone invites a model that is worse than a constant to be read as a working result. Both numbers are cheap and available before any training run.
+**When to apply:** every regression build, at the holdout-design step.
+**Precedent:** a wrist-motion regression whose trained error was roughly twice the constant-predictor error on the same holdout — a result only visible once the baseline was computed, and computed only after training.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §6.
+
+## P-25 — A class that is never predicted may be an evaluation artefact, not a dead class
+
+**Rule:** Before diagnosing a never-predicted class as a data or modelling problem ([P-07](domain.md)), **check it had validation windows at all**. An automatic split can leave a class with **zero** windows on the validation side, which makes the reported accuracy a broken average rather than a measurement. It is predictable before training from the number of recording **sessions per class**, and the remedy is an explicit holdout ([P-16](domain.md)) — not a change to the data.
+**Why:** The symptom is identical to a genuine dead class, and the two have opposite treatments: one calls for more or better data, the other for a different evaluation. Treating an evaluation artefact as a data problem sends the user to collect data they do not need.
+**When to apply:** first read of any confusion matrix, especially where some classes have few recordings.
+**Precedent:** a continuous multi-class recognition set where two classes ended with no validation windows and the headline accuracy was meaningless; supplying an explicit per-class holdout made the same data report an honest — and higher — number.
+**Source:** [dataset preparation lessons](../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md) §1; [data pipeline](../architecture/platform-data-pipeline.md).

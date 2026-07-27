@@ -20,6 +20,7 @@ from .normalize import normalize_numeric
 from .profile import DatasetProfile
 
 CASE_PATTERNS = "wiki/synthesis/support-case-patterns.md"
+DATASET_REQ = "wiki/architecture/platform-dataset-requirements.md"
 
 OUTLIER_D = 1.5     # mean Cohen's-d above which a source's class looks like a different regime (indicative)
 MIN_WINDOWS = 3     # need at least this many windows on each side for a stable comparison
@@ -88,22 +89,47 @@ def load_sources(paths, profile: DatasetProfile):
 
 
 def quality_report(df: pd.DataFrame, profile: DatasetProfile, window: int, source_col: str) -> dict:
-    """Per-source profiling + intra-class outlier flags. Pure analysis; never mutates data."""
-    sensors = [c for c in profile.sensor_columns if c in df.columns]
+    """Per-source profiling + intra-class outlier flags. Pure analysis; never mutates data.
+
+    The profiling loop always runs (it needs only row counts); class_counts and the intra-class outlier
+    comparison need the label column. quality-report never called check_dataframe, so a missing label
+    column used to KeyError here -- it now surfaces the same label_column_missing HARD_REJECT the other
+    two surfaces have, anomaly detection exempt (databuilder-017). comparison_ran tells the caller whether
+    the source comparison actually happened, so the CLI does not print a false "no outlier" reassurance.
+    """
     label_col = profile.label_column
-    shift = max(1, window // 2)
+    label_present = label_col in df.columns
+    findings: list[Finding] = []
+    if not label_present and profile.task_type != "anomaly_detection":
+        # Same guard check_dataframe / pipeline.prep carry (databuilder-010). Anomaly detection is
+        # unlabeled normal-only data (discovery/platform-task-types.md), so a missing label is its
+        # documented shape, not an error -- exempt, no finding.
+        findings.append(Finding(
+            Group.HARD_REJECT, Severity.HARD_REJECT, "label_column_missing",
+            f"The target column '{label_col}' named in the profile is not in the data. quality-report "
+            f"groups each class to compare sources, so it has no classes to compare; check the profile "
+            f"against the file.",
+            f"{DATASET_REQ}#inertial-sensor-signal-processing-row-layout",
+            {"label_column": label_col, "columns": [str(c) for c in df.columns]}))
+
+    sensors = [c for c in profile.sensor_columns if c in df.columns]
     sources = list(pd.unique(df[source_col])) if source_col in df.columns else ["all"]
 
-    # --- per-source profiling ---
+    # --- per-source profiling (class_counts only when the label column is present) ---
     profiling = []
     for src in sources:
         sub = df[df[source_col] == src] if source_col in df.columns else df
-        counts = {str(k): int(v) for k, v in sub[label_col].value_counts().sort_index().items()}
+        counts = ({str(k): int(v) for k, v in sub[label_col].value_counts().sort_index().items()}
+                  if label_present else {})
         profiling.append({"source": str(src), "rows": int(len(sub)), "class_counts": counts})
 
-    # --- intra-class source-outlier detection ---
+    # --- intra-class source-outlier detection (needs the label + >=2 sources + a window) ---
+    # window is None under Signal Processing OFF (tabular): there are no windowed features to compare, so
+    # the comparison is skipped and shift's None // 2 is never reached (databuilder-016).
     outliers, insufficient = [], []
-    if len(sources) >= 2:
+    comparison_ran = label_present and len(sources) >= 2 and window is not None
+    if comparison_ran:
+        shift = max(1, window // 2)
         for label_val in pd.unique(df[label_col]):
             cls = df[df[label_col] == label_val]
             for src in sources:
@@ -126,7 +152,6 @@ def quality_report(df: pd.DataFrame, profile: DatasetProfile, window: int, sourc
                                      "mean_d": round(mean_d, 2), "windows": int(len(f_src)),
                                      "top_axes": top})
 
-    findings = []
     for o in outliers:
         findings.append(Finding(
             Group.BAD_MODEL, Severity.ADVISORY, "source_outlier",
@@ -138,4 +163,4 @@ def quality_report(df: pd.DataFrame, profile: DatasetProfile, window: int, sourc
     return {"source_col": source_col, "sources": profiling, "outliers": outliers,
             "insufficient": insufficient, "threshold_d": OUTLIER_D,
             "note": "Cohen's-d is indicative (no documented platform cutoff); evidence for the user to judge.",
-            "findings": findings}
+            "findings": findings, "comparison_ran": comparison_ran}

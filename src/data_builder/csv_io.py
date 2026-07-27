@@ -7,6 +7,10 @@ comma-decimals. So line-endings / encoding / header / delimiter are detected on 
 """
 from __future__ import annotations
 
+import io
+import os
+import zlib
+import zipfile
 from dataclasses import dataclass
 
 import numpy as np
@@ -17,6 +21,27 @@ from .findings import Finding, Group, Severity
 DATASET_REQ = "wiki/architecture/platform-dataset-requirements.md"
 
 CANDIDATE_SEPS = {",": "comma", ";": "semicolon", "|": "pipe", "^": "caret", "\t": "tab"}
+
+# The field-count check samples the first _HEAD_ROWS data rows; _HEAD_BYTES bounds how much of the
+# file we decode to find them. 1 MiB covers 50 rows of a ~1800-column file and is always >= the
+# original 64 KB, so the sample only ever GROWS versus reading data[:65536] -- it cannot hide a
+# ragged row the old bound caught (databuilder-013).
+_HEAD_BYTES = 1 << 20
+
+# Forbidden characters in the platform's FILE NAME, duplicated from validate.FORBIDDEN_FILENAME_CHARS
+# (validate imports csv_io, so importing it back would be a cycle). A test asserts the two stay equal.
+_FORBIDDEN_FILENAME_CHARS = set(" !@#$%^&*,.?\":{}\\/|<>()[]+'`")
+
+# Errors zipfile/zlib raise for a .zip we cannot use. Bare OSError is DELIBERATELY excluded:
+# FileNotFoundError / PermissionError are OSError, and swallowing them here would report "corrupt
+# archive" (exit 2) for a missing file that must stay an IO error (exit 4) (databuilder-013).
+_ZIP_ERRORS = (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, NotImplementedError,
+               zlib.error, EOFError)
+
+# A single archive member above this is not inspected -- unzip and validate the CSV directly. Bounds
+# sniff_raw's own decompression (it holds the whole member in memory); checked against the declared
+# size BEFORE opening, then re-checked on the actual read because a declared size can lie.
+_ZIP_MEMBER_MAX = 256 * 1024 * 1024
 
 
 @dataclass
@@ -37,11 +62,144 @@ def _looks_numeric(token: str) -> bool:
         return False
 
 
+def _head_lines(data: bytes, dec_enc: str) -> list[str]:
+    """Decode a line-aligned head, bounded by _HEAD_BYTES, for the delimiter/header/field-count sample.
+
+    A row cut by the byte bound is dropped, never inspected -- its field count is an artefact of where
+    the bound fell, and reporting it as a ragged row false-rejected valid wide files. The bound only
+    ever GROWS the sample versus reading data[:65536] (databuilder-013). Single-pass: one slice, one
+    rfind, one decode -- cost is bounded by _HEAD_BYTES, not by file size.
+    """
+    head = data[:_HEAD_BYTES]
+    if len(head) < len(data):                    # the file continues past the bound
+        cut = max(head.rfind(b"\n"), head.rfind(b"\r"))
+        if cut >= 0:                             # keep only complete lines
+            head = head[:cut + 1]
+        # cut < 0: a single line longer than _HEAD_BYTES -> decode as-is; delimiter/header sniff only
+    text = head.decode(dec_enc, errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def _bad_inner_name(member_name: str):
+    """A zip member's name against the platform file-name rule, matching validate.check_filename's
+    stem derivation. Backslashes (Windows-tool archives) are path separators inside the archive, so
+    they are normalised before the basename -- a documented divergence from check_filename, which on
+    POSIX would treat the '\\' as a forbidden character (databuilder-013)."""
+    name = os.path.basename(member_name.replace("\\", "/"))
+    stem = name[:-4] if name.lower().endswith(".csv") else os.path.splitext(name)[0]
+    bad = sorted({c for c in stem if c in _FORBIDDEN_FILENAME_CHARS})
+    if bad:
+        return Finding(
+            Group.INTAKE, Severity.FIX_REQUIRED, "zip_inner_file_name",
+            f"The file inside the archive is named '{name}', which contains characters the platform "
+            f"forbids in a file name ({''.join(bad)} — note spaces and dots are not allowed). We "
+            f"cannot tell from the docs whether the platform reads the name inside a .zip; rename the "
+            f"member using only letters, digits, '-' and '_' to be safe.",
+            f"{DATASET_REQ}#file-level-requirements", {"member": name, "bad": bad})
+    return None
+
+
+def _zip_member(path: str) -> tuple[bytes | None, str | None, list[Finding]]:
+    """Resolve AND READ the single data member of a .zip. The read is INSIDE the guard because an
+    encrypted member (RuntimeError) or a content-corrupt member (zlib.error / one BadZipFile flavour)
+    raises at read time, not at open. Returns (member_bytes, member_name, findings); bytes is None on
+    any bail-out. The caller sniffs the bytes; read_table wraps them in BytesIO (databuilder-013)."""
+    def _reject(code, msg, sev=Severity.HARD_REJECT):
+        return None, None, [Finding(Group.INTAKE, sev, code, msg,
+                                    f"{DATASET_REQ}#file-level-requirements")]
+    try:
+        with zipfile.ZipFile(path) as zf:
+            infos = zf.infolist()
+            ignored: list[str] = []
+            # step 1: real files, not __MACOSX sidecars, deduped by (name, CRC, size)
+            seen, candidates = set(), []
+            for info in infos:
+                if info.is_dir() or info.filename.startswith("__MACOSX/"):
+                    ignored.append(info.filename)
+                    continue
+                key = (info.filename, info.CRC, info.file_size)
+                if key in seen:
+                    ignored.append(info.filename)
+                    continue
+                seen.add(key)
+                candidates.append(info)
+            # step 2: drop dot-prefixed basenames ONLY if that leaves >=1 candidate
+            non_dot = [i for i in candidates if not os.path.basename(i.filename).startswith(".")]
+            if non_dot and len(non_dot) < len(candidates):
+                ignored += [i.filename for i in candidates if i not in non_dot]
+                candidates = non_dot
+            if not candidates:
+                return _reject("zip_empty",
+                               "The archive has no usable data file in it. Put a single CSV inside "
+                               "the .zip and upload that.")
+            # step 4: pick the member
+            if len(candidates) == 1:
+                chosen = candidates[0]
+            else:
+                csvs = [i for i in candidates if i.filename.lower().endswith(".csv")]
+                if len(csvs) == 1:
+                    chosen = csvs[0]
+                    ignored += [i.filename for i in candidates if i is not chosen]
+                else:
+                    names = ", ".join(sorted(i.filename for i in candidates))
+                    return _reject("zip_multiple_files",
+                                   f"The archive holds more than one file ({names}) and we cannot tell "
+                                   f"which is the dataset. Put exactly one CSV inside the .zip.")
+            # size bound BEFORE opening (declared size can lie -> re-checked on read)
+            if chosen.file_size > _ZIP_MEMBER_MAX:
+                return _reject("zip_member_too_large",
+                               f"The file inside the archive ('{chosen.filename}') is larger than "
+                               f"256 MB uncompressed. Unzip it and validate the CSV directly.",
+                               Severity.FIX_REQUIRED)
+            with zf.open(chosen) as fh:
+                blob = fh.read(_ZIP_MEMBER_MAX + 1)
+            if len(blob) > _ZIP_MEMBER_MAX:
+                return _reject("zip_member_too_large",
+                               f"The file inside the archive ('{chosen.filename}') is larger than "
+                               f"256 MB uncompressed. Unzip it and validate the CSV directly.",
+                               Severity.FIX_REQUIRED)
+            findings = []
+            if ignored:
+                findings.append(Finding(
+                    Group.INFO, Severity.INFO, "zip_extra_members",
+                    f"The archive held other entries; we used '{chosen.filename}' and ignored: "
+                    f"{', '.join(sorted(ignored))}.",
+                    f"{DATASET_REQ}#file-level-requirements", {"used": chosen.filename,
+                                                               "ignored": sorted(ignored)}))
+            if not blob:
+                findings.append(Finding(
+                    Group.INTAKE, Severity.HARD_REJECT, "zip_member_empty",
+                    f"The file inside the archive ('{chosen.filename}') is empty.",
+                    f"{DATASET_REQ}#file-level-requirements"))
+                return None, chosen.filename, findings
+            name_finding = _bad_inner_name(chosen.filename)
+            if name_finding:
+                findings.append(name_finding)
+            return blob, chosen.filename, findings
+    except _ZIP_ERRORS as exc:
+        return _reject("zip_unreadable",
+                       f"'{os.path.basename(path)}' could not be read as a .zip archive ({exc}). It "
+                       f"may be corrupt, password-protected, or not actually an archive.")
+
+
 def sniff_raw(path: str) -> RawScan:
-    """Inspect the file as bytes: encoding, line endings, delimiter, header presence."""
+    """Inspect the file as bytes: encoding, line endings, delimiter, header presence.
+
+    A .zip (by extension) is unwrapped to its single member first, so every check below describes the
+    CSV inside rather than the compressed stream (databuilder-013). read_table resolves the same
+    member the same way, so the two layers cannot describe different files.
+    """
     findings: list[Finding] = []
-    with open(path, "rb") as fh:
-        data = fh.read()
+    if path.lower().endswith(".zip"):
+        blob, _member, zfindings = _zip_member(path)
+        findings.extend(zfindings)
+        if blob is None:                          # bail-out: neutral scan, delimiter None
+            return RawScan(encoding="unknown", line_endings="none", delimiter=None,
+                           has_header=True, findings=findings)
+        data = blob
+    else:
+        with open(path, "rb") as fh:
+            data = fh.read()
 
     # --- encoding ---------------------------------------------------------
     encoding = "utf-8"
@@ -86,10 +244,9 @@ def sniff_raw(path: str) -> RawScan:
     else:
         line_endings = "none"
 
-    # --- delimiter + header (decode the first two lines) ------------------
+    # --- delimiter + header (decode a line-aligned head) ------------------
     dec_enc = "utf-8" if encoding == "utf-8" else "latin-1"
-    text_head = data[:65536].decode(dec_enc, errors="replace")
-    lines = text_head.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines = _head_lines(data, dec_enc)
     first = lines[0] if lines else ""
     delimiter = None
     if first:
@@ -137,13 +294,22 @@ def read_table(path: str, sep_char: str, encoding: str):
     """Read into a DataFrame with EVERY column as a raw string (na_filter off) so locale repair can run.
 
     Returns (df_or_None, findings). A comma-delimited file containing comma-decimals makes pandas raise
-    ParserError -> returned as a HARD-REJECT finding rather than crashing.
+    ParserError -> returned as a HARD-REJECT finding rather than crashing. A .zip is resolved to its
+    single member via the SAME helper sniff_raw uses, so the two layers cannot disagree; the member's
+    resolution findings are returned only on failure (df is None) -- on success sniff_raw already
+    reported them, and returning them again would double-report in prep (databuilder-013).
     """
     enc = "utf-8" if encoding == "utf-8" else "latin-1"
+    source = path
+    if path.lower().endswith(".zip"):
+        blob, _member, zfindings = _zip_member(path)
+        if blob is None:
+            return None, zfindings          # zip_unreadable / zip_empty / zip_multiple_files / ...
+        source = io.BytesIO(blob)
     try:
         # index_col=False stops pandas silently using an extra (e.g. comma-decimal) field as the row
         # index; a ragged row then raises ParserError, which we surface as a finding.
-        df = pd.read_csv(path, sep=sep_char, dtype=str, na_filter=False, keep_default_na=False,
+        df = pd.read_csv(source, sep=sep_char, dtype=str, na_filter=False, keep_default_na=False,
                          encoding=enc, engine="c", index_col=False)
         return df, []
     except (pd.errors.ParserError, ValueError) as exc:

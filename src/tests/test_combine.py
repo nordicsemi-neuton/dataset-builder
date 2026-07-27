@@ -48,6 +48,32 @@ class TestCombine(unittest.TestCase):
         df, _ = combine_recordings([pa], ",", "utf-8", self.profile, trim_head=5, trim_tail=5)
         self.assertEqual(len(df), 40)
 
+    def test_flags_shuffled_input_file(self):
+        # databuilder-019: combine checks each input file's time order and names the file in the finding.
+        import numpy as np
+        prof = H.prof(sampling_rate_hz=100, time_column="t")
+        df = H.concat(H.block(0, 30), H.block(1, 30))
+        t = np.arange(60) / 100.0
+        t[40] = t[10]                          # big backward jump within the recording
+        df["t"] = t
+        p = _write_csv(df, self.d, "shuf.csv")
+        _, findings = combine_recordings([p], ",", "utf-8", prof)
+        flagged = [f for f in findings if f.code == "timestamps_out_of_order"]
+        self.assertEqual(len(flagged), 1)
+        self.assertEqual(flagged[0].data["source"], "shuf.csv")
+
+    def test_clean_multifile_not_flagged(self):
+        # Two clean recordings, different origins -> per-file check passes, no false flag on the seam.
+        import numpy as np
+        prof = H.prof(sampling_rate_hz=100, time_column="t")
+        frames = []
+        for t0, name in ((0.0, "a.csv"), (0.02, "b.csv")):
+            df = H.concat(H.block(0, 30), H.block(1, 30))
+            df["t"] = t0 + np.arange(60) / 100.0
+            frames.append(_write_csv(df, self.d, name))
+        _, findings = combine_recordings(frames, ",", "utf-8", prof)
+        self.assertNotIn("timestamps_out_of_order", [f.code for f in findings])
+
 
 if __name__ == "__main__":
     unittest.main()

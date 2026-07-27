@@ -44,19 +44,46 @@ def relabel_contiguous(df: pd.DataFrame, label_col: str, desired_map: dict | Non
         elif set(present) <= by_idx:
             mapping = {str(i): i for i in name_to_idx.values()}
         else:
+            # The data is neither wholly names nor wholly indices. Two inconsistencies land here, and
+            # the tool must never GUESS across either -- both block the write (P-21). Build a *total*
+            # int64 encoding first so no lookup below crashes (databuilder-011: a bare index-string used
+            # to KeyError) and no downstream int(cls) re-crashes on an object column, then choose the
+            # finding. The three token kinds are disjoint by construction, so none is assigned twice:
             unknown = sorted(set(present) - by_name - by_idx)
-            findings.append(Finding(
-                Group.HARD_REJECT, Severity.FIX_REQUIRED, "label_not_in_map",
-                f"The data contains label(s) {unknown} not in the provided class encoding. Reconcile the "
-                f"class map with the actual labels before encoding.",
-                f"{DATASET_REQ}#classification-target-rules", {"unknown": unknown}))
-            # best effort: extend the map so we still produce a frame, but the finding blocks the write
-            mapping = dict(name_to_idx)
+            mapping = dict(name_to_idx)                       # names win (pre-existing precedence)
+            for t in present:                                 # a bare index-string for a known class...
+                if t not in mapping and t in by_idx:          # ...maps to its own index; can't collapse
+                    mapping[t] = int(t)                       #    two classes (each index names one)
+            # genuinely unknown tokens -> a fresh index each, best-effort, so a --write-anyway frame is
+            # still well-formed; the finding below blocks the normal write.
             nxt = max(name_to_idx.values(), default=-1) + 1
             for u in unknown:
                 mapping[u] = nxt
                 nxt += 1
-            idx_to_name = {v: k for k, v in mapping.items()}
+            # idx_to_name must come from the real class names, extended for the unknowns only -- NOT
+            # rebuilt from the now-total mapping, or a bare index-string key would overwrite a class
+            # name at the same index and ship a wrong dictionary under --write-anyway.
+            idx_to_name = {v: k for k, v in name_to_idx.items()}
+            for u in unknown:
+                idx_to_name[mapping[u]] = u
+            if unknown:
+                findings.append(Finding(
+                    Group.HARD_REJECT, Severity.FIX_REQUIRED, "label_not_in_map",
+                    f"The data contains label(s) {unknown} not in the provided class encoding. Reconcile the "
+                    f"class map with the actual labels before encoding.",
+                    f"{DATASET_REQ}#classification-target-rules", {"unknown": unknown}))
+            else:
+                # No unknowns, yet not a subset of either keyspace: the label column mixes class names
+                # and class indices for the same encoding. Don't guess which a row means -- block.
+                mixed_names = sorted(t for t in present if t in by_name)
+                mixed_idx = sorted(t for t in present if t in by_idx and t not in by_name)
+                findings.append(Finding(
+                    Group.HARD_REJECT, Severity.FIX_REQUIRED, "label_keyspace_mixed",
+                    f"The label column mixes class names {mixed_names} and class indices {mixed_idx} for "
+                    f"the same encoding. Relabel the column using one notation (all names, or all "
+                    f"indices) before encoding -- the tool will not guess which a row means.",
+                    f"{DATASET_REQ}#classification-target-rules",
+                    {"names": mixed_names, "indices": mixed_idx}))
 
         df[label_col] = np.array([mapping[t] for t in tokens], dtype=np.int64)
         used = sorted(set(df[label_col].tolist()))

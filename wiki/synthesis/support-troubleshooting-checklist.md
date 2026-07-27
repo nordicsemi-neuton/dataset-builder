@@ -1,10 +1,12 @@
 ---
 type: synthesis
 status: active
-updated: 2026-06-25
+updated: 2026-07-23
 sources:
   - ../principles/domain.md
   - ../principles/process.md
+  - ../../raw/harvested-practice/2026-07-23-dataset-preparation-lessons.md
+  - ../../raw/harvested-practice/2026-07-23-framing-and-evaluation-lessons.md
 tags: [synthesis, troubleshooting, checklist, symptom, support]
 ---
 
@@ -28,6 +30,11 @@ tags: [synthesis, troubleshooting, checklist, symptom, support]
 | "Should we add a median/low-pass filter on device?" | Training-vs-inference artifact-rate parity FIRST | [domain P-09](../principles/domain.md) |
 | "L/R confusion in eval — model bug?" | Confirm which direction was executed first (protocol error?) | [process P-06](../principles/process.md) |
 | "Best postprocessing pipeline?" | Default EMA α≈0.3 + unknown-margin suppression; add nothing else unless needed | [domain P-08](../principles/domain.md) |
+| **"100% of my data was removed"** / "all sessions smaller than the window" | **Which column is set as Target?** A column that is unique per row (a timestamp) gives no window a consistent label, so every window is invalid — the platform reports this as sessions being too small, which points at the wrong cause. Then check run lengths | [domain P-01](../principles/domain.md), [signal processing](../architecture/platform-signal-processing.md) |
+| **"A class is never predicted"** | Did it have **any validation windows**? An automatic split can leave a class with zero, which mimics a dead class but is an evaluation artefact with the opposite fix (supply a holdout, don't collect data) | [domain P-25, P-16](../principles/domain.md) |
+| **`region 'RAM' overflowed` at compile/link** | **Dataset width.** The platform treats every non-target column as a sensor, so a wide/flattened layout multiplies the on-device window buffer: `window × columns × bytes_per_sample`. Long format (one row per timestep) is the contract | [dataset requirements](../architecture/platform-dataset-requirements.md), [signal processing](../architecture/platform-signal-processing.md) |
+| "My windowed model trains well but replays badly" | **Is this a windowed-signal problem at all?** If one row is a complete observation, Signal Processing should be off. Run the single-row baseline before anything else | [SP applicability](../architecture/platform-signal-processing-applicability.md), [process P-12, P-13](../principles/process.md) |
+| "Where are the window/shift/feature settings?" | **Signal Processing is off by default** — those settings only exist once it is switched on | [SP applicability](../architecture/platform-signal-processing-applicability.md) |
 
 ## Staged checklist (by pipeline stage)
 
@@ -39,9 +46,9 @@ tags: [synthesis, troubleshooting, checklist, symptom, support]
 
 **Window/feature errors.** "Window must be power of 2" → a frequency-domain feature is on with a non-conforming window (use 128/256/512/1024/2048 or disable freq features); "Raw data greyed out" → one of its blockers (shift≠window, freq feature, auto-window, sub-windowing, or Axon); "Sub-windowing complains" → `window/n_sub ≥ 10`, `n_sub ∈ [2,10]`. → [signal processing](../architecture/platform-signal-processing.md).
 
-**"Model too big for my MCU."** Wrong input data type (e.g. FLOAT32 when data is INT16); wrong weight bit depth; quantized output not selected; too many features (enable feature selection); too many input axes; LiteRT is larger by design. → [preprocessing options](../architecture/platform-preprocessing-options.md) / [deployment](../architecture/platform-deployment-inference.md).
+**"Model too big for my MCU."** Wrong input data type (e.g. FLOAT32 when data is INT16 — and check whether a handful of corrupt rows drove that recommendation, [domain P-23](../principles/domain.md)); wrong weight bit depth; quantized output not selected; too many features (enable feature selection); **too many input columns** — a wide/flattened layout multiplies the window buffer and can overflow RAM at link time rather than at upload; LiteRT is larger by design. → [preprocessing options](../architecture/platform-preprocessing-options.md) / [deployment](../architecture/platform-deployment-inference.md).
 
-**"Accuracy poor / overfits."** Class imbalance with Accuracy metric → use Balanced Accuracy / weighted F1; data too little or homogeneous → more, more diverse, more users; wrong window vs longest gesture; **missing idle/unknown class**; unrepresentative split → supply a holdout. → [preprocessing options](../architecture/platform-preprocessing-options.md), [domain P-10](../principles/domain.md).
+**"Accuracy poor / overfits."** Class imbalance with Accuracy metric → use Balanced Accuracy / weighted F1 (and quote imbalance **by surviving window**, not by row — [domain P-17](../principles/domain.md)); data too little or homogeneous → more, more diverse, more users; wrong window vs longest gesture; **missing idle/unknown class**; unrepresentative split → supply a holdout chosen by what it must prove ([domain P-16](../principles/domain.md)). If one class over-predicts at ~half precision, suspect a sink class rather than a settings gap ([domain P-20](../principles/domain.md)). For a continuous target, compare against the null model before judging anything ([domain P-24](../principles/domain.md)). → [preprocessing options](../architecture/platform-preprocessing-options.md), [domain P-10](../principles/domain.md).
 
 **"False detections after deployment."** Add an **unknown** class with the user's real non-target activities; retrain (canonical iteration loop). → [domain P-10](../principles/domain.md).
 

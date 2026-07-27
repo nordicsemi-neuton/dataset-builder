@@ -73,6 +73,9 @@ NF = len(FEATURES)
 
 MAGNITUDE_KEYS = ("std", "rms", "range", "mad", "absmean")
 IMPULSE_KEYS = ("crest", "hjorth_mob", "hjorth_comp")  # impulse/shape trigger (Skewness/Kurtosis excluded)
+# Families with no group in build_recommendation until a class's top one-vs-rest discriminator lands
+# in them. Making these reachable is databuilder-015 D2a-3; every FFAM family is now reachable.
+TRIGGERABLE_FAMILIES = ("Crossing", "Variation", "Autocorrelation")
 
 
 def window_features(arr, win):
@@ -203,12 +206,18 @@ def analyze(df, label_col, sensors, window, names, dtype, blind_d, top_n):
     # --- per-class one-vs-rest top discriminator ---
     per_class = []
     impulse_class = False
+    triggered = set()
     for c in classes:
         a = feats[c]; b = X[y != c]
         d = cohens_d(a, b)
         j = int(np.argmax(np.abs(d)))
         if key_of(j) in IMPULSE_KEYS:
             impulse_class = True
+        # Same evidence that drives the impulse trigger, extended to the three families that were
+        # unreachable: a family enters the recommendation when it holds a class's single strongest
+        # one-vs-rest discriminator. This is what makes every family in FFAM reachable.
+        if fam_of(j) in TRIGGERABLE_FAMILIES:
+            triggered.add(fam_of(j))
         per_class.append({"class": c, "name": names.get(c, str(c)),
                           "top_feature": feat_names[j], "family": fam_of(j),
                           "cohens_d": round(float(d[j]), 4)})
@@ -232,8 +241,9 @@ def analyze(df, label_col, sensors, window, names, dtype, blind_d, top_n):
                     "best_signed_feature": feat_names[bj],
                     "best_signed_d": round(float(d[bj]), 4)})
 
-    rec = build_recommendation(dtype, bool(blind_pairs), impulse_class)
+    rec = build_recommendation(dtype, bool(blind_pairs), impulse_class, triggered)
     return {"ok": True, "window": window, "dtype": dtype,
+            "triggered_families": sorted(triggered),
             "classes_analyzed": [{"class": c, "name": names.get(c, str(c)), "windows": int(len(feats[c]))}
                                  for c in classes],
             "excluded_classes": excluded,
@@ -243,9 +253,13 @@ def analyze(df, label_col, sensors, window, names, dtype, blind_d, top_n):
             "note": "Separability is indicative (no documented platform cutoff); evidence for the user to judge."}
 
 
-def build_recommendation(dtype, has_blind_pairs, impulse_class):
-    """Deterministic mapping of findings + storage dtype to a platform enable-set (full names)."""
+def build_recommendation(dtype, has_blind_pairs, impulse_class, triggered=()):
+    """Deterministic mapping of findings + storage dtype to a platform enable-set (full names).
+
+    `triggered` is a set of TRIGGERABLE_FAMILIES names, each of which holds a class's strongest
+    one-vs-rest discriminator; its group is appended so that every family in FFAM is reachable."""
     is_int = dtype.startswith("int")
+    triggered = set(triggered)
     enable = [
         {"group": "Energy",
          "features": ["Standard Deviation", "Root Mean Square", "Range",
@@ -262,6 +276,21 @@ def build_recommendation(dtype, has_blind_pairs, impulse_class):
         enable.append({"group": "Impulse/shape",
                        "features": ["Crest Factor", "Hjorth Mobility", "Hjorth Complexity"],
                        "why": "A class is isolated by impulse/shape (e.g. a sharp tap) that energy misses."})
+    # Families that were unreachable before: appended when a class's strongest one-vs-rest
+    # discriminator lives there. Fixed order for determinism. No hold-back is invented for these —
+    # the wiki states none, and the platform's own feature-selection prunes redundancy.
+    if "Crossing" in triggered:
+        enable.append({"group": "Crossing rate",
+                       "features": ["Zero-crossing Rate", "Mean-crossing Rate"],
+                       "why": "A class is separated by how often the signal crosses zero / its mean."})
+    if "Variation" in triggered:
+        enable.append({"group": "Signal variation",
+                       "features": ["Root Difference Square", "Average Magnitude Difference"],
+                       "why": "A class is separated by successive-sample variation (roughness), not level."})
+    if "Autocorrelation" in triggered:
+        enable.append({"group": "Autocorrelation",
+                       "features": ["Autocorrelation"],
+                       "why": "A class is separated by short-lag self-similarity (periodicity/smoothness)."})
     holdbacks = []
     if is_int:
         holdbacks.append(f"Storage is {dtype.upper()} (integer): do NOT recommend Skewness or Kurtosis "

@@ -40,6 +40,31 @@ class TestCli(unittest.TestCase):
             code = cli.main(["validate", self.csv, "--profile", self.profile_path, "--window", "5"])
         self.assertEqual(code, 2)  # FIX_REQUIRED
 
+    def test_validate_sp_off_tabular_runs_without_window(self):
+        # A tabular profile (SP off, no gesture classes) validates with no --window and no candidates.
+        raw = dict(H.BASE_PROFILE, sampling_rate_hz=100, signal_processing=False, window=None,
+                   class_encoding={"map": {"a": 0, "b": 1, "c": 2}, "continuous_classes": [],
+                                   "gesture_classes": []})
+        p = os.path.join(self.d, "tab.json")
+        with open(p, "w") as fh:
+            json.dump(raw, fh)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cli.main(["validate", self.csv, "--profile", p, "--json"])
+        self.assertEqual(code, 0)  # window checks skipped; sp_off_unverified is ADVISORY
+        self.assertIn("sp_off_unverified", [f["code"] for f in json.loads(buf.getvalue())["findings"]])
+
+    def test_validate_malformed_candidate_errors_loudly(self):
+        # A non-int window candidate must not be silently skipped (it would hide the window checks).
+        raw = dict(H.BASE_PROFILE, sampling_rate_hz=100,
+                   window={"candidates": [None], "shift": 20, "frequency_domain_features": False})
+        p = os.path.join(self.d, "badcand.json")
+        with open(p, "w") as fh:
+            json.dump(raw, fh)
+        with self.assertRaises(SystemExit) as cm:
+            cli.main(["validate", self.csv, "--profile", p])
+        self.assertEqual(cm.exception.code, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

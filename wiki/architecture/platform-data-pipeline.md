@@ -1,7 +1,7 @@
 ---
 type: architecture
 status: active
-updated: 2026-06-25
+updated: 2026-07-23
 implementation:
   - ../../raw/platform-docs/2026-06-25-pipeline-overview.md
 sources:
@@ -14,7 +14,9 @@ sources:
   - ../../raw/platform-docs/2026-06-25-neural-network-framework.md
   - ../../raw/platform-docs/2026-06-25-anomaly-detection.md
   - ../../raw/platform-docs/2026-06-25-get-started-2-cleaning-combining-preprocessing.md
-tags: [platform, pipeline, workflow, upload, solution, holdout, session-id]
+  - ../../raw/owner-notes/2026-07-23-signal-processing-default.md
+  - ../../raw/harvested-practice/2026-07-23-framing-and-evaluation-lessons.md
+tags: [platform, pipeline, workflow, upload, solution, holdout, session-id, signal-processing]
 ---
 
 # platform — Model-creating pipeline (end-to-end workflow)
@@ -27,7 +29,7 @@ Steps (per the Model creating pipeline overview):
 2. **Dataset requirements** — the input contract → [dataset requirements](platform-dataset-requirements.md).
 3. **Data uploading & setup** — upload, pick target column, session ID, holdout (below).
 4. **Data preprocessing** — input type, normalization, task/metric → [preprocessing options](platform-preprocessing-options.md).
-5. **Signal processing** — windowing/features → [signal processing](platform-signal-processing.md) + [feature extraction](platform-feature-extraction.md).
+5. **Signal processing** *(optional — an option on the solution, and **off by default**; see [applicability](platform-signal-processing-applicability.md))* — windowing/features → [signal processing](platform-signal-processing.md) + [feature extraction](platform-feature-extraction.md). With SP **off** the platform trains on the CSV as a plain feature table (one row = one training sample) and no windowing, shift or feature setting applies. Choosing the mode is upstream of every data-preparation decision.
 6. **Model training** — automatic (Neuton) or configured (LiteRT/Axon).
 7. **Model settings** — bit depth, output format, target HW → [deployment/inference](platform-deployment-inference.md).
 8. **Run inference on MCU** / **9. Run inference on desktop** → [deployment/inference](platform-deployment-inference.md).
@@ -55,6 +57,31 @@ Workflow as stated in the overview: **(1) select data for training → (2) train
 - Toggle on and **upload a separate validation CSV** that **matches the training format** — the holdout must have the same file structure and field order as the training set (per [dataset requirements](platform-dataset-requirements.md)).
 - If **off**, the platform **auto-splits the training data 80% train / 20% validation**.
 - **Anomaly detection does not support a holdout dataset** (single model only) — see [task types](../discovery/platform-task-types.md).
+
+#### How the auto-split partitions the data — `[needs clarification]`
+
+The docs state the 80/20 ratio and nothing about the **mechanism**. This matters: on continuous
+windowed data a per-window random split puts adjacent, near-identical windows on both sides and
+inflates the score, whereas a session-grouped split does not.
+
+Field observations **disagree**: datasets carrying a designated Session ID column have appeared to be
+split by whole session, while datasets without one have shown the leak signature of a per-window split.
+
+**Hypothesis (unverified):** the partition is session-grouped when a Session ID column is designated
+and per-window otherwise. Consistent with both observations, confirmed by neither. **Neither reading
+should be stated to a user as fact.**
+
+**Consequence that holds regardless of mechanism:** an auto-split can leave a class with **zero
+validation windows**, making the reported accuracy a broken average rather than a measurement. Observed
+on a continuous multi-class recognition set where some classes had only two recordings — two classes
+ended with no validation windows and the headline figure was meaningless. The symptom (a class that is
+never predicted) looks exactly like a dead class caused by data or modelling, but is an *evaluation*
+artefact. It is predictable before training from the number of recording sessions per class, and the
+remedy is to supply an explicit holdout rather than to change the data.
+See [harvested practice](../../raw/harvested-practice/2026-07-23-framing-and-evaluation-lessons.md).
+
+*To verify:* create a solution with and without a designated Session ID column and compare the
+reported validation composition. Until then this block stays `[needs clarification]`.
 
 ## Output of the pipeline
 

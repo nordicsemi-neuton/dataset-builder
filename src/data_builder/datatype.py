@@ -23,6 +23,7 @@ def recommend_dtype(df: pd.DataFrame, feature_cols, target_technology: str = "ne
                 "rule_ref": f"{PREPROC}#input-data-type-one-type-for-the-whole-dataset"}
 
     any_float = False
+    float_col = None   # provenance: the first column carrying a fractional value (databuilder-021 / B4)
     vmin, vmax = np.inf, -np.inf
     for col in feature_cols:
         if col not in df.columns:
@@ -33,12 +34,17 @@ def recommend_dtype(df: pd.DataFrame, feature_cols, target_technology: str = "ne
             continue
         if not np.all(np.equal(np.mod(arr, 1), 0)):
             any_float = True
+            if float_col is None:
+                float_col = col
         vmin = min(vmin, float(arr.min()))
         vmax = max(vmax, float(arr.max()))
 
     if any_float:
+        # Name the offending column so a user seeing FLOAT32 can tell a genuine float column from a
+        # (post-B4: never) resample artifact. Evidence only -- the dtype DECISION is unchanged.
         return {"dtype": "FLOAT32",
-                "reason": "At least one value is fractional (a float), so the whole dataset is FLOAT32.",
+                "reason": f"At least one value in column '{float_col}' is fractional (a float), so the "
+                          f"whole dataset is FLOAT32.",
                 "rule_ref": f"{PREPROC}#input-data-type-one-type-for-the-whole-dataset"}
     if vmin == np.inf:  # no numeric values seen
         return {"dtype": "FLOAT32", "reason": "No numeric feature values found; defaulting to FLOAT32.",

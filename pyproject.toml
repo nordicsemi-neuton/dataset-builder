@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dataset-builder"
-version = "0.1.0"
+version = "0.2.0"
 description = "Prepare inertial-sensor recordings into upload-ready training datasets for the Nordic Edge AI Lab platform."
 readme = "README.md"
 license = { file = "LICENSE" }

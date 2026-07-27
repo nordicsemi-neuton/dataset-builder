@@ -21,6 +21,7 @@ import pandas as pd
 from .findings import Finding, Group, Severity
 
 SIGNAL_PROC = "wiki/architecture/platform-signal-processing.md"
+PREPROC = "wiki/architecture/platform-preprocessing-options.md"
 UNIT_PER_SECOND = {"s": 1.0, "ms": 1e3, "us": 1e6}
 
 NOOP_TOL = 0.02      # |target-src|/src at or below this -> pass-through re-grid, no anti-alias filter
@@ -173,8 +174,23 @@ def resample_to_rate(df: pd.DataFrame, time_col: str | None, target_hz: float, s
             f"resampling. Add them to the profile if they should be kept.",
             f"{SIGNAL_PROC}#sampling-rate-rule-critical-for-our-data-builder", {"dropped": extra}))
 
+    # Integer preservation (ADR-0004 / databuilder-021): detect sensor columns whose every source value
+    # is a whole number, by value CONTENT (as datatype.recommend_dtype decides dtype), not pandas dtype --
+    # robust to int64 / float64 / string input. These are re-quantized back to whole numbers after
+    # resampling (below), so interpolation / anti-alias filtering does not fabricate decimal precision the
+    # sensor never recorded (defect #10). An all-NaN column is not "integral" (matches recommend_dtype).
+    integral_cols = []
+    for ax in sensor_cols:
+        if ax not in df.columns:
+            continue
+        arr = pd.to_numeric(df[ax], errors="coerce").to_numpy(dtype=np.float64)
+        arr = arr[~np.isnan(arr)]
+        if arr.size and np.all(np.mod(arr, 1) == 0):
+            integral_cols.append(ax)
+
     unit = UNIT_PER_SECOND[time_unit]
     out_parts = []
+    resampled_any = False   # did any run actually go through interpolation (regrid / downsample)?
     groups = list(df.groupby(session_col, sort=False)) if has_session else [(None, df)]
 
     for sid, sub in groups:
@@ -249,6 +265,31 @@ def resample_to_rate(df: pd.DataFrame, time_col: str | None, target_hz: float, s
                  "up": int(up) if is_down else None, "down": int(down) if is_down else None,
                  "fir_taps": int(2 * FIR_HALF_TAPS * max(up, down) + 1) if is_down else None}))
 
+        resampled_any = resampled_any or session_resampled
+
     if not out_parts:
         return df, findings
-    return pd.concat(out_parts, ignore_index=True)[keep_cols], findings
+    out = pd.concat(out_parts, ignore_index=True)[keep_cols]
+
+    # Integer preservation (ADR-0004): re-quantize the integral sensor columns back to whole numbers, so
+    # interpolation / anti-alias filtering does not fabricate decimal precision the sensor never recorded.
+    # The column stays float64 (never cast to an integer storage dtype); csv_io._format_value renders an
+    # integral float as an integer. Done ONLY when a resample actually ran (resampled_any) -- a fully
+    # refused / no-resample frame is left untouched and not falsely disclosed. time/label/session are
+    # excluded defensively: they are never interpolated (label/session are filled; the time grid is a
+    # continuous regenerated grid that must not be rounded). pd.to_numeric at the round site keeps it safe
+    # on an object column (a string-typed direct-caller input mixed with a refused, original-rate run).
+    round_cols = [c for c in integral_cols
+                  if c in out.columns and c not in {time_col, label_col, session_col}]
+    if resampled_any and round_cols:
+        for c in round_cols:
+            out[c] = np.round(pd.to_numeric(out[c], errors="coerce").to_numpy(dtype=np.float64))
+        findings.append(Finding(
+            Group.INFO, Severity.INFO, "resample_integer_preserved",
+            f"Integral sensor columns {round_cols} had their resampled estimates re-quantized to whole "
+            f"numbers, so resampling does not fabricate decimal precision the sensor never recorded "
+            f"(these columns held only whole numbers). Columns with any fractional value keep their "
+            f"resampled floats.",
+            f"{PREPROC}#input-data-type-one-type-for-the-whole-dataset",
+            {"columns": round_cols}))
+    return out, findings

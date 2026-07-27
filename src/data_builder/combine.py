@@ -1,16 +1,21 @@
 """combine — structural concatenation of several recordings into one single-header frame.
 
-Structural ONLY (no value-dependent ops): read each file, drop a per-file index column, optional
-bounded edge-trim in SAMPLES, and ABORT on any column-set/order mismatch — never concat-then-report,
-which would let pandas NaN-fill or mis-align a sensor axis (databuilder-001 [gate]).
+No value-dependent TRANSFORMS: read each file, drop a per-file index column, optional bounded edge-trim
+in SAMPLES, and ABORT on any column-set/order mismatch — never concat-then-report, which would let
+pandas NaN-fill or mis-align a sensor axis (databuilder-001 [gate]). Read-only per-file checks (index
+detection; per-file timestamp order, databuilder-019) run here because they must see each recording
+BEFORE concatenation — a concatenation seam across files is a legitimate clock reset, so checking the
+combined frame would false-flag it; checking each file alone never sees the seam.
 """
 from __future__ import annotations
+
+import os
 
 import pandas as pd
 
 from . import csv_io
 from .findings import Finding, Group, Severity
-from .normalize import find_index_column
+from .normalize import find_index_column, check_time_order
 from .profile import DatasetProfile
 
 
@@ -64,6 +69,12 @@ def combine_recordings(paths, sep_char: str, encoding: str, profile: DatasetProf
                     {"path": str(path), "rows": n}))
             else:
                 df = df.iloc[trim_head: n - trim_tail].reset_index(drop=True)
+        # Per-file time order (read-only). Checking each recording alone means a concatenation seam
+        # (a new file restarting its clock) is never in view, so combine's own restarts are exempt by
+        # construction -- no heuristic (databuilder-019). prep is always SP-on today; when SP-off prep
+        # exists (B5b) this call must be gated on the mode.
+        findings.extend(check_time_order(df, profile.time_column, profile.session_column,
+                                         source=os.path.basename(path)))
         frames.append(df)
 
     if not frames:
